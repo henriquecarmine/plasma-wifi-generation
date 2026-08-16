@@ -33,10 +33,15 @@ for po in po/*.po; do
 done
 
 # 3. The .plasmoid for the KDE Store — a plain zip of the package.
+#
+# No version in the filename: the store reads the version from
+# metadata.json, so putting it in the name duplicates the fact and breaks
+# every written-down path on each release. The tarball below keeps its
+# version because rpmbuild matches Source0 against it.
 mkdir -p dist
-rm -f "dist/wifi-generation-$VERSION.plasmoid"
+rm -f dist/wifi-generation.plasmoid
 ( cd package && cp ../LICENSE ../README.md . 2>/dev/null || true
-  zip -qr "../dist/wifi-generation-$VERSION.plasmoid" . -x '.*' )
+  zip -qr ../dist/wifi-generation.plasmoid . -x '.*' )
 rm -f package/LICENSE package/README.md
 
 # 4. The source tarball the .spec expects.
@@ -49,6 +54,6 @@ cp po/*.po po/*.pot "$tmp/$NAME-$VERSION/po/"
 rm -rf "$tmp"
 
 echo
-echo "dist/wifi-generation-$VERSION.plasmoid   -> KDE Store"
+echo "dist/wifi-generation.plasmoid            -> KDE Store (version lives in metadata.json)"
 echo "dist/$NAME-$VERSION.tar.gz               -> put in ~/rpmbuild/SOURCES/ and run:"
 echo "                                            rpmbuild -ba $NAME.spec"
