@@ -1,7 +1,7 @@
 %global plasmoid_id com.henrique.wifigeracao
 
 Name:           plasma-applet-wifi-generation
-Version:        1.2
+Version:        1.3
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -61,6 +61,12 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.3-1
+- Popup height follows its content; the tray's leftover space now has a
+  single destination instead of being spread between sections.
+- Channel and width are shown again: the i18n rewrite had dropped the detail
+  grid that carried them.
+
 * Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.2-1
 - Internationalised: interface strings now go through gettext.
 - Translations: English (source), Portuguese (Brazil), Spanish, French.
