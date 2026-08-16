@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Wi-Fi Generation 1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-16 02:48-0300\n"
+"POT-Creation-Date: 2026-08-16 03:10-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -94,29 +94,29 @@ msgstr ""
 msgid "Opening network settings…"
 msgstr ""
 
-#: package/contents/ui/main.qml:268 package/contents/ui/main.qml:356
+#: package/contents/ui/main.qml:268 package/contents/ui/main.qml:367
 msgid "%1/%2 Mb/s  ·  %3 dBm (%4)"
 msgstr ""
 
-#: package/contents/ui/main.qml:389
+#: package/contents/ui/main.qml:400
 msgid "%1 network nearby"
 msgid_plural "%1 networks nearby"
 msgstr[0] ""
 msgstr[1] ""
 
-#: package/contents/ui/main.qml:398
+#: package/contents/ui/main.qml:409
 msgid "scanning…"
 msgstr ""
 
-#: package/contents/ui/main.qml:407
+#: package/contents/ui/main.qml:418
 msgid "Scan again"
 msgstr ""
 
-#: package/contents/ui/main.qml:444
+#: package/contents/ui/main.qml:461
 msgid "You are already on this network."
 msgstr ""
 
-#: package/contents/ui/main.qml:494
+#: package/contents/ui/main.qml:523
 msgid ""
 "Dimmed padlock: network not saved yet — opens settings for the password."
 msgstr ""

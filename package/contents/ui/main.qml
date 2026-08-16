@@ -301,18 +301,29 @@ PlasmoidItem {
 
     // -------------------------------------------------------------- popup
     fullRepresentation: Item {
+        id: janela
+
+        // Height follows the CONTENT. With a fixed height and a list set to
+        // fillHeight, three networks left ~180 px of dead space between the
+        // last row and the footer — it read as unfinished.
+        readonly property int alturaLinha: Kirigami.Units.gridUnit * 2
+        readonly property int alturaLista: Math.min(
+            Math.max(redes.count, 1) * alturaLinha,
+            Kirigami.Units.gridUnit * 14)   // ceiling: then it scrolls
+
         // implicitWidth/Height, not just the Layout hints. An Item with no
         // implicit size opens the popup at zero by zero: the click works,
         // the state turns expanded, and nothing shows on screen.
         implicitWidth:  Kirigami.Units.gridUnit * 20
-        implicitHeight: Kirigami.Units.gridUnit * 20
+        implicitHeight: coluna.implicitHeight + Kirigami.Units.largeSpacing * 2
 
         Layout.minimumWidth:    Kirigami.Units.gridUnit * 16
-        Layout.minimumHeight:   Kirigami.Units.gridUnit * 16
         Layout.preferredWidth:  Kirigami.Units.gridUnit * 20
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 20
+        Layout.minimumHeight:   implicitHeight
+        Layout.preferredHeight: implicitHeight
 
         ColumnLayout {
+            id: coluna
             anchors.fill: parent
             anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.smallSpacing
@@ -417,7 +428,13 @@ PlasmoidItem {
             ListView {
                 id: lista
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                // implicitHeight, não só preferredHeight: um ListView tem
+                // implicitHeight ZERO por definição, então a altura da coluna
+                // — e portanto a da janela — saía sem contar a lista. A
+                // bandeja então impunha o mínimo dela e a diferença virava
+                // vão morto distribuído entre as seções.
+                implicitHeight: janela.alturaLista
+                Layout.preferredHeight: janela.alturaLista
                 model: redes
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
@@ -427,7 +444,7 @@ PlasmoidItem {
 
                 delegate: Rectangle {
                     width: lista.width
-                    height: Kirigami.Units.gridUnit * 2
+                    height: janela.alturaLinha
                     color: mouse.containsMouse && !model.emUso
                            ? Kirigami.Theme.highlightColor
                            : "transparent"
@@ -487,6 +504,18 @@ PlasmoidItem {
                         }
                     }
                 }
+            }
+
+            // Espaçador explícito: com fillHeight em NENHUM item, a folga da
+            // janela (a bandeja impõe uma altura mínima própria) acabava
+            // distribuída ENTRE as seções — vão acima da lista e abaixo dela.
+            // Dando um destino único à sobra, a lista encosta no cabeçalho e
+            // o que resta vira respiro antes do rodapé, que lê como
+            // intencional. Duas hipóteses minhas sobre a origem da folga
+            // falharam; isto não depende de descobrir a origem.
+            Item {
+                Layout.fillHeight: true
+                Layout.minimumHeight: 0
             }
 
             PlasmaComponents.Label {
