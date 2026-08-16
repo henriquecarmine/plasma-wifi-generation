@@ -77,11 +77,62 @@ fi
 # stale: measured 2026-08-16, a network at 80% signal was simply absent from
 # the cache and came back the moment a scan was requested. A network list
 # without a scan is an old photograph.
+# Geração de cada rede vista, do CACHE de varredura do kernel.
+#
+# `iw scan dump` lê o cache — não dispara varredura e, ao contrário de `iw
+# scan`, roda sem root (conferido). O `nmcli` não expõe geração nenhuma e o
+# wpa_supplicant nega acesso ao barramento para usuário comum; o `iw` é o
+# único caminho.
+#
+# Emite "ssid<TAB>numero", uma linha por rede, com a MAIOR geração vista para
+# aquele nome: com dois rádios anunciando o mesmo SSID, o que vale é o melhor
+# que a rede oferece.
+_geracoes() {
+	[ -n "${IF:-}" ] || return 0
+	cache="${XDG_CACHE_HOME:-$HOME/.cache}/wifi-geracao-redes.tsv"
+
+	# O registro fecha no PRÓXIMO "BSS", não numa linha interna: no `iw`, o
+	# "last seen" vem ANTES do SSID e das capacidades, e fechar ali gravava
+	# sempre um registro vazio — a primeira versão não devolvia nada.
+	visto=$(iw dev "$IF" scan dump 2>/dev/null | awk '
+		function fecha() { if (ssid != "" && g > vis[ssid]) vis[ssid] = g }
+		/^BSS /            { fecha(); ssid=""; g=0 }
+		/^\tSSID: /        { ssid=substr($0, 8) }
+		/EHT capabilities/ { if (g<7) g=7 }
+		/HE capabilities/  { if (g<6) g=6 }
+		/VHT capabilities/ { if (g<5) g=5 }
+		/HT capabilities/  { if (g<4) g=4 }
+		END { fecha(); for (s in vis) printf "%s\t%d\n", s, vis[s] }
+	')
+
+	# O cache do KERNEL guarda só a última varredura; o NetworkManager lembra
+	# de redes ouvidas minutos atrás e as lista assim mesmo. Sem memória
+	# própria, o número da geração piscava: aparecia numa varredura e sumia na
+	# seguinte, para a mesma rede — pior que não mostrar. Aqui o que já se
+	# aprendeu é guardado e fundido, mantendo sempre a MAIOR geração vista.
+	printf '%s\n%s\n' "$visto" "$(cat "$cache" 2>/dev/null)" \
+	| awk -F'\t' 'NF==2 && $1!="" { if ($2+0 > v[$1]+0) v[$1]=$2 }
+	               END { for (s in v) printf "%s\t%s\n", s, v[s] }' \
+	| tee "$cache" 2>/dev/null
+}
+
+
+# A interface precisa ser conhecida ANTES da varredura: a geração de cada
+# rede sai de `iw dev <if> scan dump`, e com IF vazio o campo saía em branco.
+IF=$(iw dev 2>/dev/null | awk '/[[:space:]]Interface /{print $2; exit}')
 if [ "${1:-}" = "--networks" ]; then
 	if [ "${2:-}" = "--scan" ]; then
 		/usr/bin/nmcli dev wifi rescan >/dev/null 2>&1
 		sleep 4   # rescan returns at once; the results arrive later
 	fi
+	# Uma leitura só do cache, DEPOIS da varredura e antes do laço.
+	#
+	# A ordem custou um defeito: calculando antes do rescan, uma rede que só
+	# aparecia na varredura nova saía sem geração — foi visto com um
+	# repetidor a 100% de sinal listado sem número nenhum. E ler por rede,
+	# dentro do laço, seriam dezenas de execuções de `iw` para a mesma
+	# informação.
+	GERACOES=$(_geracoes)
 	# Matched by SSID, not by profile name — see _wifi_profiles.
 	saved=$(_wifi_profiles | cut -f1)
 	/usr/bin/nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID dev wifi list --rescan no 2>/dev/null \
@@ -97,14 +148,18 @@ if [ "${1:-}" = "--networks" ]; then
 		# protocol name (WPA2, WPA3…), which is not translatable anyway.
 		[ -n "$sec" ] && sec_out="$sec" || sec_out="open"
 		if printf '%s\n' "$saved" | grep -qxF "$ssid"; then sav=1; else sav=0; fi
-		printf '%s|%s|%s|%s|%s\n' "$use" "${sig:-0}" "$sec_out" "$sav" "$ssid"
+		# Geração da rede, do cache de varredura. Campo NOVO antes do
+		# ssid: o ssid é o único que pode conter "|" ou ":", então
+		# continua sendo o último, e quem lê recupera o resto com um
+		# corte simples.
+		ger=$(printf '%s\n' "$GERACOES" | awk -F'\t' -v s="$ssid" '$1==s {print $2; exit}')
+		printf '%s|%s|%s|%s|%s|%s\n' "$use" "${sig:-0}" "$sec_out" "$sav" "${ger:-}" "$ssid"
 	done \
 	| sort -t'|' -k2,2nr \
-	| awk -F'|' '!seen[$5]++'   # same network from several APs: keep the strongest
+	| awk -F'|' '!seen[$6]++'   # same network from several APs: keep the strongest
 	exit 0
 fi
 
-IF=$(iw dev 2>/dev/null | awk '/[[:space:]]Interface /{print $2; exit}')
 [ -n "${IF:-}" ] || { echo "nowifi"; exit 0; }
 
 LINK=$(iw dev "$IF" link 2>/dev/null)
@@ -168,6 +223,167 @@ if [ "${1:-}" = "--rede" ]; then
 				"$dev" "$(_ip4 "$dev")" "$(_gw4 "$dev")" "$vel"
 		fi
 	done
+	exit 0
+fi
+
+# Perfil do NetworkManager que governa uma interface.
+#
+# Três degraus, porque o caso que importa é justamente o pior: com o cabo
+# DESCONECTADO não há conexão ativa, e é exatamente aí que se quer entrar para
+# corrigir o endereço. Buscar só em `device status` devolvia vazio e a tela de
+# configuração não abria.
+_perfil_de() {
+	dev="$1"
+	p=$(/usr/bin/nmcli -t -f DEVICE,CONNECTION device status 2>/dev/null \
+	    | awk -F: -v d="$dev" '$1==d && $2!="--" {print $2; exit}')
+	[ -n "$p" ] || p=$(/usr/bin/nmcli -t -f NAME,DEVICE connection show 2>/dev/null \
+	    | awk -F: -v d="$dev" '$2==d {print $1; exit}')
+	if [ -z "$p" ]; then
+		tipo=802-3-ethernet
+		[ -d "/sys/class/net/$dev/wireless" ] && tipo=802-11-wireless
+		p=$(/usr/bin/nmcli -t -f NAME,TYPE connection show 2>/dev/null \
+		    | awk -F: -v t="$tipo" '$2==t {print $1; exit}')
+	fi
+	printf '%s' "$p"
+}
+
+# --perfil <dev>: "perfil|metodo|ip/cidr|gateway|dns|pppoe"
+#
+# `metodo` é token do NetworkManager: auto (DHCP), manual, disabled…
+# `pppoe` traz o NOME de um perfil PPPoE já existente para essa interface, ou
+# vazio. O widget só OFERECE PPPoE se houver perfil — criar um exigiria pedir
+# usuário e senha numa tela de painel e passá-los por linha de comando, onde
+# qualquer processo os leria em `ps`. Trocar para um perfil que o dono já
+# criou não tem esse problema.
+if [ "${1:-}" = "--perfil" ]; then
+	dev="${2:-}"
+	[ -n "$dev" ] || { echo "|||||"; exit 0; }
+	perfil=$(_perfil_de "$dev")
+	metodo=""; ip4=""; gw=""; dns=""
+	if [ -n "$perfil" ]; then
+		metodo=$(/usr/bin/nmcli -g ipv4.method connection show "$perfil" 2>/dev/null)
+		ip4=$(/usr/bin/nmcli -g ipv4.addresses connection show "$perfil" 2>/dev/null)
+		gw=$(/usr/bin/nmcli -g ipv4.gateway connection show "$perfil" 2>/dev/null)
+		dns=$(/usr/bin/nmcli -g ipv4.dns connection show "$perfil" 2>/dev/null)
+	fi
+	pppoe=$(/usr/bin/nmcli -t -f NAME,TYPE connection show 2>/dev/null \
+	        | awk -F: '$2=="pppoe" {print $1; exit}')
+	printf '%s|%s|%s|%s|%s|%s\n' \
+		"$perfil" "${metodo:-}" "${ip4:-}" "${gw:-}" "${dns:-}" "${pppoe:-}"
+	exit 0
+fi
+
+# --enderecos <dev>: o retrato de endereçamento da interface.
+#   "metodo|auto"            — como o perfil pega endereço
+#   "fixo|192.168.1.50/24"   — cada endereço ESTÁTICO do perfil
+#   "ativo|192.168.1.124/24" — cada endereço realmente montado agora
+#
+# Fixo e ativo são coisas diferentes e ambas importam: um endereço estático
+# recém-adicionado só vira ativo depois que a conexão sobe, e um endereço de
+# DHCP é ativo sem ser fixo. Mostrar só um dos dois mente em metade dos casos.
+if [ "${1:-}" = "--enderecos" ]; then
+	dev="${2:-}"; [ -n "$dev" ] || exit 0
+	perfil=$(_perfil_de "$dev")
+	if [ -n "$perfil" ]; then
+		printf 'metodo|%s\n' "$(/usr/bin/nmcli -g ipv4.method connection show "$perfil" 2>/dev/null)"
+		/usr/bin/nmcli -g ipv4.addresses connection show "$perfil" 2>/dev/null \
+		| tr ',' '\n' | while IFS= read -r a; do
+			a=$(printf '%s' "$a" | tr -d ' ')
+			[ -n "$a" ] && printf 'fixo|%s\n' "$a"
+		done
+	fi
+	/usr/sbin/ip -4 -o addr show "$dev" 2>/dev/null \
+	| awk '{print "ativo|"$4}'
+	exit 0
+fi
+
+# --addip <dev> <ip/cidr> · --delip <dev> <ip/cidr>
+#
+# Usa o `+`/`-` do nmcli, que existem justamente para propriedades de LISTA.
+# Reescrever a lista inteira a cada mudança perderia o que já estava lá na
+# primeira corrida de dedos.
+#
+# Não mexe no método: o NetworkManager aceita endereço estático JUNTO com
+# `auto`. É isso que permite pendurar um IP de manutenção sem abrir mão do
+# DHCP — e foi o que faltou no dia em que um roteador de fábrica precisou ser
+# alcançado sem derrubar a rede de casa.
+if [ "${1:-}" = "--addip" ] || [ "${1:-}" = "--delip" ]; then
+	dev="${2:-}"; end="${3:-}"
+	perfil=$(_perfil_de "$dev")
+	[ -n "$perfil" ] || { echo "FAIL|noprofile"; exit 1; }
+	[ -n "$end" ]    || { echo "FAIL|noaddress"; exit 1; }
+	case "$end" in */*) : ;; *) end="$end/24" ;; esac
+	if [ "$1" = "--addip" ]; then
+		out=$(/usr/bin/nmcli connection modify "$perfil" +ipv4.addresses "$end" 2>&1); rc=$?
+	else
+		out=$(/usr/bin/nmcli connection modify "$perfil" -ipv4.addresses "$end" 2>&1); rc=$?
+	fi
+	[ "$rc" = 0 ] || { echo "FAIL|$out"; exit 1; }
+	out=$(/usr/bin/nmcli connection up "$perfil" 2>&1); rc=$?
+	[ "$rc" = 0 ] && echo "OK|$out" || echo "FAIL|$out"
+	exit 0
+fi
+
+# --sugerir <dev> [rede]: um endereço LIVRE para manutenção, verificado.
+#
+# A escolha não é arbitrária. Varre de .240 para baixo, faixa que quase nunca
+# está no poço do DHCP doméstico (que costuma ir de .100 a .200), e só devolve
+# quem NÃO responder a ping — endereço em uso derruba a máquina do outro e
+# nem sempre volta atrás sozinho.
+#
+# Emite "livre|<ip/cidr>" ou "nenhum|".
+if [ "${1:-}" = "--sugerir" ]; then
+	dev="${2:-}"; rede="${3:-}"
+	if [ -z "$rede" ]; then
+		rede=$(/usr/sbin/ip -4 -o addr show "$dev" 2>/dev/null \
+		       | awk '{print $4; exit}')
+	fi
+	[ -n "$rede" ] || { echo "nenhum|"; exit 0; }
+	base=$(printf '%s' "$rede" | cut -d/ -f1 | cut -d. -f1-3)
+	mask=$(printf '%s' "$rede" | cut -d/ -f2)
+	[ -n "$mask" ] || mask=24
+	for ultimo in 240 241 242 245 250 230 220 210; do
+		alvo="$base.$ultimo"
+		if ! ping -c1 -W1 -n "$alvo" >/dev/null 2>&1; then
+			printf 'livre|%s/%s\n' "$alvo" "$mask"
+			exit 0
+		fi
+	done
+	echo "nenhum|"
+	exit 0
+fi
+
+# --aplicar <dev> auto
+# --aplicar <dev> manual <ip/cidr> [gateway] [dns]
+# --aplicar <dev> pppoe <perfil>
+#
+# Emite "OK|<detalhe>" ou "FAIL|<detalhe>", como o --connect: o resultado vai
+# para a TELA. Aplicar endereço e não dizer o que houve é o defeito mais caro
+# que este widget já teve.
+if [ "${1:-}" = "--aplicar" ]; then
+	dev="${2:-}"; modo="${3:-}"
+	perfil=$(_perfil_de "$dev")
+	[ -n "$perfil" ] || { echo "FAIL|noprofile"; exit 1; }
+	case "$modo" in
+	auto)
+		out=$(/usr/bin/nmcli connection modify "$perfil" \
+			ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns "" 2>&1); rc=$? ;;
+	manual)
+		end="${4:-}"; gw="${5:-}"; dns="${6:-}"
+		[ -n "$end" ] || { echo "FAIL|noaddress"; exit 1; }
+		out=$(/usr/bin/nmcli connection modify "$perfil" \
+			ipv4.method manual ipv4.addresses "$end" \
+			ipv4.gateway "$gw" ipv4.dns "$dns" 2>&1); rc=$? ;;
+	pppoe)
+		alvo="${4:-}"
+		[ -n "$alvo" ] || { echo "FAIL|noprofile"; exit 1; }
+		out=$(/usr/bin/nmcli connection up id "$alvo" 2>&1); rc=$?
+		[ "$rc" = 0 ] && { echo "OK|$out"; exit 0; } || { echo "FAIL|$out"; exit 1; } ;;
+	*) echo "FAIL|badmode"; exit 1 ;;
+	esac
+	if [ "$rc" != 0 ]; then echo "FAIL|$out"; exit 1; fi
+	out=$(/usr/bin/nmcli connection up "$perfil" 2>&1); rc=$?
+	[ "$rc" = 0 ] && echo "OK|$out" || echo "FAIL|$out"
 	exit 0
 fi
 

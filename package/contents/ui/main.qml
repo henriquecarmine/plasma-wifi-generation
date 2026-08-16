@@ -192,6 +192,87 @@ PlasmoidItem {
 
     property bool radioLigado: true
 
+    // ---- configuração de endereço --------------------------------------
+    // Índice da linha com o formulário aberto, ou -1. Um de cada vez: dois
+    // formulários abertos numa janela deste tamanho é ruído, não recurso.
+    property int linhaConfig: -1
+    property string cfgDev: ""
+    property string cfgPerfil: ""
+    property string cfgMetodo: "auto"
+    property string cfgEndereco: ""
+    property string cfgGateway: ""
+    property string cfgDns: ""
+    property string cfgPppoe: ""
+    property string cfgNovo: ""
+    // Endereços da interface aberta: {texto, fixo}. "fixo" é do PERFIL e pode
+    // ser removido; o que vem do DHCP é só retrato e não tem "×".
+    ListModel { id: enderecos }
+
+    function montarEnderecos(saida) {
+        enderecos.clear();
+        const linhas = saida.split("\n");
+        const fixos = {};
+        for (let i = 0; i < linhas.length; i++) {
+            const c = linhas[i].split("|");
+            if (c[0] === "metodo") root.cfgMetodo = (c[1] || "").indexOf("manual") >= 0 ? "manual" : "auto";
+            else if (c[0] === "fixo" && c[1]) fixos[c[1]] = true;
+        }
+        for (const f in fixos) enderecos.append({ "texto": f, "fixo": true });
+        for (let j = 0; j < linhas.length; j++) {
+            const c = linhas[j].split("|");
+            if (c[0] === "ativo" && c[1] && !fixos[c[1]])
+                enderecos.append({ "texto": c[1], "fixo": false });
+        }
+    }
+
+    function abrirConfig(indice, dev) {
+        root.linhaConfig = indice;
+        root.cfgDev = dev;
+        root.avisoAcao = "";
+        root.cfgNovo = "";
+        exec.connectSource(cmd("--perfil " + dev));
+        exec.connectSource(cmd("--enderecos " + dev));
+    }
+
+    function sugerirEndereco() {
+        exec.connectSource(cmd("--sugerir " + root.cfgDev));
+    }
+    function adicionarEndereco() {
+        const e = root.cfgNovo.trim();
+        if (e.length === 0) {
+            root.avisoAcao = i18nd(dom, "Type the address as 192.168.1.50/24");
+            return;
+        }
+        exec.connectSource(cmd("--addip " + root.cfgDev + " '" + e + "'"));
+        root.cfgNovo = "";
+    }
+    function removerEndereco(texto) {
+        exec.connectSource(cmd("--delip " + root.cfgDev + " '" + texto + "'"));
+    }
+
+    function aplicarConfig() {
+        const d = root.cfgDev;
+        if (root.cfgMetodo === "auto") {
+            exec.connectSource(cmd("--aplicar " + d + " auto"));
+        } else if (root.cfgMetodo === "pppoe") {
+            exec.connectSource(cmd("--aplicar " + d + " pppoe '" + root.cfgPppoe + "'"));
+        } else {
+            // Endereços já foram aplicados um a um pelas fichas; aqui vai o
+            // que resta do modo manual. Sem nenhum endereço fixo, mudar para
+            // manual deixaria a interface sem IP — pior que o estado atual.
+            if (enderecos.count === 0) {
+                root.avisoAcao = i18nd(dom, "Add at least one address first");
+                return;
+            }
+            let lista = [];
+            for (let i = 0; i < enderecos.count; i++)
+                if (enderecos.get(i).fixo) lista.push(enderecos.get(i).texto);
+            exec.connectSource(cmd("--aplicar " + d + " manual '" + lista.join(",")
+                + "' '" + root.cfgGateway.trim() + "' '" + root.cfgDns.trim() + "'"));
+        }
+        root.linhaConfig = -1;
+    }
+
     // Qual símbolo a bandeja mostra. Regra do dono: dois enlaces com saída
     // para rede e GATEWAYS DIFERENTES ao mesmo tempo — balanceamento ou
     // redundância — pedem o símbolo misto; se só um estiver conectado,
@@ -232,6 +313,29 @@ PlasmoidItem {
             } else if (source.indexOf("--radio") >= 0) {
                 root.radioLigado = (saida === "on");
                 // O rádio mudou: tudo o que dependia dele está velho.
+                root.lerEstado();
+                root.lerRede();
+            } else if (source.indexOf("--perfil") >= 0) {
+                const c = saida.split("|");
+                root.cfgPerfil   = c[0] || "";
+                root.cfgMetodo   = (c[1] || "auto").indexOf("manual") >= 0 ? "manual" : "auto";
+                root.cfgEndereco = (c[2] || "").split(",")[0];
+                root.cfgGateway  = c[3] || "";
+                root.cfgDns      = (c[4] || "").split(",")[0];
+                root.cfgPppoe    = c[5] || "";
+            } else if (source.indexOf("--enderecos") >= 0) {
+                root.montarEnderecos(saida);
+            } else if (source.indexOf("--sugerir") >= 0) {
+                const c = saida.split("|");
+                if (c[0] === "livre") root.cfgNovo = c[1];
+                else root.avisoAcao = i18nd(dom, "No free address found in this range");
+            } else if (source.indexOf("--addip") >= 0 || source.indexOf("--delip") >= 0) {
+                root.mostrarResultado(saida);
+                if (root.cfgDev.length > 0)
+                    exec.connectSource(cmd("--enderecos " + root.cfgDev));
+                root.lerRede();
+            } else if (source.indexOf("--aplicar") >= 0) {
+                root.mostrarResultado(saida);
                 root.lerEstado();
                 root.lerRede();
             } else if (source.indexOf("--rede") >= 0) {
@@ -326,13 +430,14 @@ PlasmoidItem {
         const linhas = saida.split("\n");
         for (let i = 0; i < linhas.length; i++) {
             const c = linhas[i].split("|");
-            if (c.length < 5) continue;
+            if (c.length < 6) continue;
             redes.append({
                 emUso:     c[0] === "1",
                 sinalPct:  parseInt(c[1]) || 0,
                 seguranca: c[2],
                 salva:     c[3] === "1",
-                nome:      c.slice(4).join("|")   // an SSID may contain "|"
+                geracao:   c[4],                  // "4".."7", vazio se desconhecida
+                nome:      c.slice(5).join("|")   // an SSID may contain "|"
             });
         }
     }
@@ -587,10 +692,17 @@ PlasmoidItem {
                 model: interfaces
 
                 delegate: RowLayout {
+                    id: linha
                     Layout.fillWidth: true
                     // Teto explícito: sem ele o balão cresce para caber a
                     // linha, em vez de a linha caber no balão.
                     Layout.maximumWidth: coluna.width
+                    // A dica do gateway saía ATRÁS da linha de cima: irmãos
+                    // desenhados depois cobrem os de antes, e a dica nasce
+                    // presa a este item. Subindo a linha inteira enquanto o
+                    // mouse está nela, a dica passa a ser desenhada por
+                    // último e aparece inteira.
+                    z: areaDica.containsMouse ? 10 : 0
                     spacing: Kirigami.Units.smallSpacing
 
                     Kirigami.Icon {
@@ -664,6 +776,187 @@ PlasmoidItem {
                             hoverEnabled: true
                             acceptedButtons: Qt.NoButton
                         }
+                    }
+
+                    // Abre o formulário de endereço DESTA interface.
+                    PlasmaComponents.ToolButton {
+                        icon.name: "configure"
+                        flat: true
+                        implicitWidth: Kirigami.Units.iconSizes.small * 1.6
+                        implicitHeight: implicitWidth
+                        checked: root.linhaConfig === index
+                        onClicked: root.linhaConfig === index
+                            ? root.linhaConfig = -1
+                            : root.abrirConfig(index, model.dev)
+                        PlasmaComponents.ToolTip.visible: hovered
+                        PlasmaComponents.ToolTip.text: i18nd(root.dom, "Address settings")
+                    }
+                }
+            }
+
+            // Formulário de endereço, uma linha por vez. Fica FORA do
+            // Repeater das linhas: dentro dele, cada delegate teria o seu, e
+            // a janela cresceria com formulários invisíveis empilhados.
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: root.linhaConfig >= 0
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaComponents.Label {
+                    text: i18nd(root.dom, "Address of %1 (%2)", root.cfgDev, root.cfgPerfil)
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.7
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    spacing: Kirigami.Units.largeSpacing
+                    PlasmaComponents.RadioButton {
+                        text: i18nd(root.dom, "DHCP")
+                        checked: root.cfgMetodo === "auto"
+                        onToggled: if (checked) root.cfgMetodo = "auto"
+                    }
+                    PlasmaComponents.RadioButton {
+                        text: i18nd(root.dom, "Manual")
+                        checked: root.cfgMetodo === "manual"
+                        onToggled: if (checked) root.cfgMetodo = "manual"
+                    }
+                    // PPPoE só aparece se JÁ existir um perfil desse tipo.
+                    // Criar um pediria usuário e senha nesta tela, e a senha
+                    // iria por linha de comando, onde qualquer processo a lê.
+                    PlasmaComponents.RadioButton {
+                        visible: root.cfgPppoe.length > 0
+                        text: i18nd(root.dom, "PPPoE")
+                        checked: root.cfgMetodo === "pppoe"
+                        onToggled: if (checked) root.cfgMetodo = "pppoe"
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // Endereços como FICHAS. Cada ficha é um endereço montado na
+                // interface; o "×" só existe nos que vêm do perfil, porque
+                // endereço de DHCP não se remove — some quando o lease morre.
+                //
+                // Aqui a ação é IMEDIATA: adicionar e remover valem na hora,
+                // sem passar pelo Aplicar. Um botão que guarda mudanças de
+                // lista para depois obriga a lembrar o que se pediu.
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Repeater {
+                        model: enderecos
+                        delegate: Rectangle {
+                            radius: height / 2
+                            color: Kirigami.Theme.textColor
+                            opacity: model.fixo ? 0.14 : 0.08
+                            implicitWidth: fichaLinha.implicitWidth + Kirigami.Units.largeSpacing
+                            implicitHeight: fichaLinha.implicitHeight + Kirigami.Units.smallSpacing
+
+                            RowLayout {
+                                id: fichaLinha
+                                anchors.centerIn: parent
+                                spacing: Kirigami.Units.smallSpacing
+
+                                PlasmaComponents.Label {
+                                    text: model.texto
+                                    font: Kirigami.Theme.smallFont
+                                    opacity: model.fixo ? 1.0 : 0.75
+                                }
+                                PlasmaComponents.Label {
+                                    visible: !model.fixo
+                                    text: i18nd(root.dom, "dhcp")
+                                    font: Kirigami.Theme.smallFont
+                                    opacity: 0.5
+                                }
+                                PlasmaComponents.ToolButton {
+                                    visible: model.fixo
+                                    icon.name: "edit-delete-remove"
+                                    flat: true
+                                    implicitWidth: Kirigami.Units.iconSizes.small * 1.2
+                                    implicitHeight: implicitWidth
+                                    onClicked: root.removerEndereco(model.texto)
+                                    PlasmaComponents.ToolTip.visible: hovered
+                                    PlasmaComponents.ToolTip.text: i18nd(root.dom, "Remove this address")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Acrescentar um endereço. O "sugerir" varre de .240 para
+                // baixo — faixa que quase nunca está no poço do DHCP — e só
+                // devolve quem não responder a ping.
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.TextField {
+                        text: root.cfgNovo
+                        placeholderText: i18nd(root.dom, "another address, e.g. 192.168.1.240/24")
+                        onTextChanged: root.cfgNovo = text
+                        onAccepted: root.adicionarEndereco()
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                    }
+                    PlasmaComponents.ToolButton {
+                        icon.name: "games-solve"
+                        flat: true
+                        onClicked: root.sugerirEndereco()
+                        PlasmaComponents.ToolTip.visible: hovered
+                        PlasmaComponents.ToolTip.text: i18nd(root.dom, "Suggest a free address")
+                    }
+                    PlasmaComponents.ToolButton {
+                        icon.name: "list-add"
+                        flat: true
+                        onClicked: root.adicionarEndereco()
+                        PlasmaComponents.ToolTip.visible: hovered
+                        PlasmaComponents.ToolTip.text: i18nd(root.dom, "Add address")
+                    }
+                }
+
+                GridLayout {
+                    visible: root.cfgMetodo === "manual"
+                    columns: 2
+                    columnSpacing: Kirigami.Units.smallSpacing
+                    rowSpacing: Kirigami.Units.smallSpacing
+                    Layout.fillWidth: true
+
+                    PlasmaComponents.Label {
+                        text: i18nd(root.dom, "Gateway")
+                        font: Kirigami.Theme.smallFont
+                    }
+                    PlasmaComponents.TextField {
+                        text: root.cfgGateway
+                        placeholderText: "192.168.1.1"
+                        onTextChanged: root.cfgGateway = text
+                        Layout.fillWidth: true
+                    }
+                    PlasmaComponents.Label {
+                        text: i18nd(root.dom, "DNS")
+                        font: Kirigami.Theme.smallFont
+                    }
+                    PlasmaComponents.TextField {
+                        text: root.cfgDns
+                        placeholderText: "1.1.1.1"
+                        onTextChanged: root.cfgDns = text
+                        Layout.fillWidth: true
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Item { Layout.fillWidth: true }
+                    PlasmaComponents.Button {
+                        text: i18nd(root.dom, "Cancel")
+                        flat: true
+                        onClicked: root.linhaConfig = -1
+                    }
+                    PlasmaComponents.Button {
+                        text: i18nd(root.dom, "Apply")
+                        icon.name: "dialog-ok-apply"
+                        onClicked: root.aplicarConfig()
                     }
                 }
             }
@@ -778,6 +1071,25 @@ PlasmoidItem {
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                             font.bold: model.emUso
+                        }
+
+                        // Geração da rede, lida do cache de varredura do
+                        // kernel. Só o número: escrever "Wi-Fi 6" em cada
+                        // linha triplicaria a largura para repetir o prefixo
+                        // que já é o nome do widget.
+                        PlasmaComponents.Label {
+                            visible: model.geracao.length > 0
+                            text: model.geracao
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.55
+                            PlasmaComponents.ToolTip.visible: areaGer.containsMouse
+                            PlasmaComponents.ToolTip.text: i18nd(root.dom, "Wi-Fi %1", model.geracao)
+                            MouseArea {
+                                id: areaGer
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
                         }
 
                         PlasmaComponents.Label {

@@ -1,7 +1,7 @@
 %global plasmoid_id com.henrique.wifigeracao
 
 Name:           plasma-applet-wifi-generation
-Version:        1.5
+Version:        1.6
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -61,6 +61,38 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.6-1
+- Addresses are now a LIST per interface, shown as chips: add, remove, and a
+  suggest button that scans from .240 downwards — a range rarely inside a
+  home DHCP pool — and only offers what does not answer a ping. Taking an
+  address already in use knocks the other machine off the network, and it
+  does not always come back on its own.
+- Adding a static address does NOT switch the profile away from DHCP. The
+  NetworkManager accepts static addresses alongside `auto`, which is what
+  lets a maintenance IP be hung on an interface without giving up the working
+  network — exactly what was missing the day a factory-default router had to
+  be reached without dropping the house.
+- Chips act immediately; Apply is left for method, gateway and DNS. A button
+  that stores list changes for later forces the user to remember what was
+  asked for.
+- Method can be set per interface: DHCP, manual, or PPPoE — the last one only
+  when a PPPoE profile already exists. Creating one would mean typing a
+  username and password into a panel form and passing them on a command line,
+  where any process reads them with `ps`.
+- The profile lookup has three fallbacks, because the case that matters is the
+  worst one: with the cable DISCONNECTED there is no active connection, and
+  that is exactly when someone opens the widget to fix the address.
+- The scan now shows each network's generation, read from the kernel's scan
+  cache with `iw scan dump` — which, unlike `iw scan`, runs without root.
+  NetworkManager exposes no generation at all and wpa_supplicant denies bus
+  access to a plain user.
+- Generations are REMEMBERED between scans. The kernel cache holds only the
+  last scan while NetworkManager lists networks heard minutes ago, so without
+  memory the number blinked in and out for the same network — worse than not
+  showing it.
+- Fixed: the gateway tooltip was drawn behind the row above. Siblings drawn
+  later cover earlier ones, and the tooltip is anchored to its own row; the
+  row now rises a layer while the mouse is on it.
 * Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.5-1
 - The popup now lists EVERY physical interface, one row each: medium on the
   left (channel and width for Wi-Fi, negotiated link speed for wired), live

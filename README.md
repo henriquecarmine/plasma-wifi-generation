@@ -56,6 +56,17 @@ the protocol.
   a dot in the bottom-left corner when two links carry different gateways —
   load balancing or redundancy. The same gateway on both is not a mix: it is
   one exit reached by two paths.
+- **The generation of every scanned network**, not only the connected one:
+  the number sits beside each name in the list. It comes from the kernel's
+  scan cache via `iw scan dump`, which runs without root — NetworkManager
+  exposes no generation and wpa_supplicant denies bus access to a plain user.
+  Generations are remembered between scans, because the kernel cache holds
+  only the last one while NetworkManager lists networks heard minutes ago.
+- **Addresses as a list per interface**, shown as chips you can add and
+  remove, with a suggest button that offers a free address verified by ping.
+  A static address can be hung on an interface **without leaving DHCP** —
+  which is how you reach a factory-default router without dropping the
+  network you are using.
 
 ## Connecting
 
