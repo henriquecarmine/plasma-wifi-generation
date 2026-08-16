@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Wi-Fi Generation — marca da loja, leitura A: o indicador.
+
+  A mesma geometria do ícone da bandeja, em tamanho grande: leque de três
+  arcos abrindo para cima, ponto na base, e o número da geração ancorado no
+  canto inferior direito com um VÃO aberto por trás.
+
+  O vão é máscara, não tinta de fundo. O fundo é degradê: pintar por cima com
+  "a cor do fundo" acertaria num ponto e erraria em todos os outros.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="fundo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#4fc3f7"/>
+      <stop offset="0.55" stop-color="#2196d8"/>
+      <stop offset="1"   stop-color="#0f5b8f"/>
+    </linearGradient>
+
+    <!-- Branco = mostra, preto = esconde. O traço preto por baixo do dígito
+         abre a folga que separa o número dos arcos. -->
+    <mask id="vao">
+      <rect x="0" y="0" width="512" height="512" fill="#fff"/>
+      <text x="432" y="392" font-family="Noto Sans, sans-serif" font-weight="700"
+            font-size="184" text-anchor="end" fill="#000" stroke="#000"
+            stroke-width="34" stroke-linejoin="round">6</text>
+    </mask>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="114" ry="114" fill="url(#fundo)"/>
+
+  <g mask="url(#vao)" fill="none" stroke="#ffffff" stroke-width="36" stroke-linecap="round">
+    <!-- Arcos de 225° a 315°: começam embaixo à esquerda e terminam embaixo à
+         direita, passando pelo topo. -->
+    <path d="M 200.8 274.8 A 78 78 0 0 1 311.2 274.8"/>
+    <path d="M 158.4 232.4 A 138 138 0 0 1 353.6 232.4"/>
+    <path d="M 116.0 190.0 A 198 198 0 0 1 396.0 190.0"/>
+    <circle cx="256" cy="330" r="23" fill="#ffffff" stroke="none"/>
+  </g>
+
+  <text x="432" y="392" font-family="Noto Sans, sans-serif" font-weight="700"
+        font-size="184" text-anchor="end" fill="#ffffff">6</text>
+</svg>

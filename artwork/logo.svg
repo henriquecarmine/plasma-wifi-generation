@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Wi-Fi Generation — marca da loja, leitura B: o controlador.
+
+  Mesmo leque, e embaixo dele os dois cursores do símbolo universal de
+  ajuste. É o que separa este widget de um medidor: ele liga e desliga o
+  rádio, troca o endereço, amarra a conexão a um ponto. O leque diz o que se
+  vê; os cursores dizem o que se pode mexer.
+
+  Os cursores ficam ABAIXO da linha do leque, não sobre ele. Empilhados,
+  virariam borrão em 48 px — e uma marca precisa sobreviver ao tamanho de
+  favicon.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="fundo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#4fc3f7"/>
+      <stop offset="0.55" stop-color="#2196d8"/>
+      <stop offset="1"   stop-color="#0f5b8f"/>
+    </linearGradient>
+
+    <mask id="vao">
+      <rect x="0" y="0" width="512" height="512" fill="#fff"/>
+      <text x="424" y="330" font-family="Noto Sans, sans-serif" font-weight="700"
+            font-size="150" text-anchor="end" fill="#000" stroke="#000"
+            stroke-width="30" stroke-linejoin="round">6</text>
+    </mask>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="114" ry="114" fill="url(#fundo)"/>
+
+  <g mask="url(#vao)" fill="none" stroke="#ffffff" stroke-width="32" stroke-linecap="round">
+    <path d="M 208.6 224.4 A 67 67 0 0 1 303.4 224.4"/>
+    <path d="M 172.2 188.0 A 118 118 0 0 1 339.8 188.0"/>
+    <path d="M 135.8 151.6 A 169 169 0 0 1 376.2 151.6"/>
+    <circle cx="256" cy="272" r="21" fill="#ffffff" stroke="none"/>
+  </g>
+
+  <text x="424" y="330" font-family="Noto Sans, sans-serif" font-weight="700"
+        font-size="150" text-anchor="end" fill="#ffffff">6</text>
+
+  <!-- Dois cursores: trilho fino, punho grosso, em posições diferentes —
+       controle que se mexe, não enfeite simétrico. -->
+  <g stroke="#ffffff" stroke-linecap="round" fill="#ffffff" opacity="0.95">
+    <line x1="140" y1="392" x2="372" y2="392" stroke-width="14"/>
+    <circle cx="212" cy="392" r="26"/>
+    <line x1="140" y1="452" x2="372" y2="452" stroke-width="14"/>
+    <circle cx="308" cy="452" r="26"/>
+  </g>
+</svg>

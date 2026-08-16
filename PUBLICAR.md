@@ -24,6 +24,26 @@ textos e as capturas ficam prontos aqui e o clique final é seu:
 4. Enviar `dist/wifi-generation.plasmoid` e as duas capturas de
    `screenshots/`.
 
+## Logo
+
+`artwork/logo.svg` — o leque com o número da geração e, embaixo, dois
+cursores. O leque diz o que se **vê**; os cursores dizem o que se **mexe**, e
+é isso que separa este widget de um medidor: ele liga o rádio, troca o
+endereço, amarra a conexão a um ponto de acesso.
+
+`artwork/logo-indicador.svg` é a mesma marca sem os cursores, para quando só
+couber o símbolo.
+
+Só o SVG fica versionado; o PNG se gera na hora, como os catálogos:
+
+```bash
+magick -background none artwork/logo.svg -resize 512x512 -depth 8 logo.png
+```
+
+O vão em volta do "6" é **máscara**, não tinta da cor do fundo: o fundo é
+degradê, e pintar por cima acertaria num ponto e erraria em todos os outros.
+Conferido a 48 px, que é onde uma marca morre se estiver cheia demais.
+
 ## Capturas
 
 - `screenshots/01-tray.png` — o ícone na bandeja, entre os vizinhos.
