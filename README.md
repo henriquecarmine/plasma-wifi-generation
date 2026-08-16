@@ -41,6 +41,11 @@ the protocol.
 - **In the tooltip:** generation, network, speed and signal.
 - **On click:** band, channel, width, up/down rate, signal in dBm with a
   plain-language quality, and the list of networks sorted by signal.
+- **Address and traffic:** IP and gateway on the same line as the channel,
+  aligned to the right edge, plus live download and upload rates sampled
+  every two seconds while the popup is open.
+- **A switch for the radio**, which keeps working with the radio off — the
+  subcommand behind it never touches the wireless interface.
 
 ## Connecting
 

@@ -108,6 +108,47 @@ IF=$(iw dev 2>/dev/null | awk '/[[:space:]]Interface /{print $2; exit}')
 [ -n "${IF:-}" ] || { echo "nowifi"; exit 0; }
 
 LINK=$(iw dev "$IF" link 2>/dev/null)
+
+# --radio [on|off]: liga, desliga ou informa o rádio. Emite "on" ou "off".
+#
+# Fica ANTES de qualquer coisa que dependa da interface: com o rádio
+# desligado não há `iw dev` nenhum, e o botão precisa continuar respondendo
+# justamente nesse estado — senão desliga e não liga mais.
+if [ "${1:-}" = "--radio" ]; then
+	case "${2:-}" in
+	on|off) /usr/bin/nmcli radio wifi "$2" >/dev/null 2>&1 ;;
+	esac
+	estado=$(/usr/bin/nmcli radio wifi 2>/dev/null)
+	[ "$estado" = "enabled" ] && echo "on" || echo "off"
+	exit 0
+fi
+
+# --rede: "iface|ip/cidr|gateway"
+#
+# Campos vazios quando não há endereço — quem decide o que mostrar é o QML,
+# que é onde as palavras podem ser traduzidas.
+if [ "${1:-}" = "--rede" ]; then
+	[ -n "${IF:-}" ] || { echo "|||"; exit 0; }
+	ip4=$(/usr/sbin/ip -4 addr show "$IF" 2>/dev/null \
+	      | awk '/inet /{print $2; exit}')
+	gw=$(/usr/sbin/ip -4 route show default dev "$IF" 2>/dev/null \
+	     | awk '{print $3; exit}')
+	printf '%s|%s|%s\n' "$IF" "${ip4:-}" "${gw:-}"
+	exit 0
+fi
+
+# --taxa: "rx_bytes|tx_bytes" — CONTADORES CRUS, não velocidade.
+#
+# A taxa sai da diferença entre duas leituras, e quem tem relógio é o QML.
+# Fazer o script dormir um segundo para calcular aqui travaria o motor de
+# execução do Plasma a cada atualização.
+if [ "${1:-}" = "--taxa" ]; then
+	[ -n "${IF:-}" ] || { echo "|"; exit 0; }
+	printf '%s|%s\n' \
+		"$(cat "/sys/class/net/$IF/statistics/rx_bytes" 2>/dev/null || echo 0)" \
+		"$(cat "/sys/class/net/$IF/statistics/tx_bytes" 2>/dev/null || echo 0)"
+	exit 0
+fi
 case "$LINK" in
 	*"Not connected"*|"") echo "disconnected"; exit 0 ;;
 esac

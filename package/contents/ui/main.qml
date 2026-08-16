@@ -115,6 +115,44 @@ PlasmoidItem {
         }
     }
 
+    // ---- rede e tráfego ------------------------------------------------
+    property string iface: ""
+    property string ip: ""
+    property string gateway: ""
+    property bool radioLigado: true
+    // Bytes por segundo, calculados aqui: o script entrega contador cru.
+    property real taxaDown: 0
+    property real taxaUp: 0
+    property real ultimoRx: -1
+    property real ultimoTx: -1
+    property double ultimoMs: 0
+
+    function medirTaxa(linha) {
+        const c = linha.split("|");
+        const rx = parseFloat(c[0]), tx = parseFloat(c[1]);
+        if (isNaN(rx) || isNaN(tx)) return;
+        const agora = Date.now();
+        if (root.ultimoRx >= 0 && agora > root.ultimoMs) {
+            const dt = (agora - root.ultimoMs) / 1000;
+            // Diferença negativa não é tráfego: é o contador reiniciando
+            // quando a interface cai e volta. Zerar é mais honesto que
+            // mostrar um pico de gigabytes.
+            const dr = rx - root.ultimoRx, dtx = tx - root.ultimoTx;
+            root.taxaDown = dr >= 0 ? dr / dt : 0;
+            root.taxaUp   = dtx >= 0 ? dtx / dt : 0;
+        }
+        root.ultimoRx = rx; root.ultimoTx = tx; root.ultimoMs = agora;
+    }
+
+    // Unidades não passam por catálogo: "kB/s" e "MB/s" são as mesmas em
+    // toda parte, e o gettext rebaixaria a tradução por causa da barra.
+    function textoTaxa(bps) {
+        if (!root.conectado) return "—";
+        if (bps < 1024) return Math.round(bps) + " B/s";
+        if (bps < 1048576) return (bps / 1024).toFixed(bps < 10240 ? 1 : 0) + " kB/s";
+        return (bps / 1048576).toFixed(1) + " MB/s";
+    }
+
     ListModel { id: redes }
 
     P5Support.DataSource {
@@ -130,6 +168,18 @@ PlasmoidItem {
                 root.montarRedes(saida);
             } else if (source.indexOf("--detail") >= 0) {
                 root.aplicar(saida);
+            } else if (source.indexOf("--radio") >= 0) {
+                root.radioLigado = (saida === "on");
+                // O rádio mudou: tudo o que dependia dele está velho.
+                root.lerEstado();
+                root.lerRede();
+            } else if (source.indexOf("--rede") >= 0) {
+                const c = saida.split("|");
+                root.iface   = c[0] || "";
+                root.ip      = c[1] || "";
+                root.gateway = c[2] || "";
+            } else if (source.indexOf("--taxa") >= 0) {
+                root.medirTaxa(saida);
             } else if (source.indexOf("--connect") >= 0) {
                 // The result goes ON SCREEN. An earlier version called nmcli
                 // and ignored both output and exit code — it failed silently,
@@ -144,6 +194,12 @@ PlasmoidItem {
     }
 
     function lerEstado()  { exec.connectSource(cmd("--detail")); }
+    function lerRede()    { exec.connectSource(cmd("--rede")); }
+    function lerRadio()   { exec.connectSource(cmd("--radio")); }
+    function alternarRadio(ligar) {
+        root.avisoAcao = "";
+        exec.connectSource(cmd("--radio " + (ligar ? "on" : "off")));
+    }
     // NetworkManager's cache: instant (0.25 s), but it goes stale.
     function lerRedes()   { exec.connectSource(cmd("--networks")); }
     // A real scan: ~4.5 s. Without it a live network vanishes from the list —
@@ -253,8 +309,24 @@ PlasmoidItem {
     // `root.expanded`, not bare `expanded`: the bare name is read as an
     // injected handler parameter, a deprecated practice plasmashell warns
     // about in the journal on every load.
+    // Amostra só com o balão ABERTO. Duas leituras por segundo de /sys num
+    // widget que passa o dia fechado é gasto sem leitor.
+    Timer {
+        interval: 2000
+        running: root.expanded
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: exec.connectSource(root.cmd("--taxa"))
+    }
+
     onExpandedChanged: {
         if (root.expanded) {
+            // Zera a base: com a medida anterior de minutos atrás, a
+            // primeira taxa sairia como média do intervalo inteiro.
+            root.ultimoRx = -1;
+            root.ultimoTx = -1;
+            root.lerRede();
+            root.lerRadio();
             root.avisoAcao = "";
             root.lerRedes();     // cache: the list shows at once
             root.varrerRedes();  // scan: replaces it in ~4 s
@@ -314,11 +386,11 @@ PlasmoidItem {
         // implicitWidth/Height, not just the Layout hints. An Item with no
         // implicit size opens the popup at zero by zero: the click works,
         // the state turns expanded, and nothing shows on screen.
-        implicitWidth:  Kirigami.Units.gridUnit * 20
+        implicitWidth:  Kirigami.Units.gridUnit * 27
         implicitHeight: coluna.implicitHeight + Kirigami.Units.largeSpacing * 2
 
-        Layout.minimumWidth:    Kirigami.Units.gridUnit * 16
-        Layout.preferredWidth:  Kirigami.Units.gridUnit * 20
+        Layout.minimumWidth:    Kirigami.Units.gridUnit * 22
+        Layout.preferredWidth:  Kirigami.Units.gridUnit * 27
         Layout.minimumHeight:   implicitHeight
         Layout.preferredHeight: implicitHeight
 
@@ -343,6 +415,7 @@ PlasmoidItem {
 
                 ColumnLayout {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     spacing: 0
 
                     PlasmaExtras.Heading {
@@ -377,15 +450,88 @@ PlasmoidItem {
                     // current link. The i18n rewrite dropped the detail grid
                     // that used to carry them and they ended up shown
                     // nowhere — a regression introduced by that conversion.
-                    PlasmaComponents.Label {
-                        visible: root.conectado && root.canal.length > 0
-                        text: i18nd(root.dom, "Channel %1  ·  %2",
-                                    root.canal, root.largura)
-                        opacity: 0.7
-                        font: Kirigami.Theme.smallFont
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
+                }
+
+                // ---- coluna da direita: rádio, tráfego e endereços -------
+                //
+                // À direita e alinhada à direita: números em coluna, com a
+                // mesma borda, leem-se de relance. Alinhados à esquerda eles
+                // dançavam conforme o comprimento — 9 kB/s e 12,3 MB/s
+                // começando em lugares diferentes.
+                ColumnLayout {
+                    Layout.alignment: Qt.AlignTop | Qt.AlignRight
+                    spacing: 0
+
+                    RowLayout {
+                        Layout.alignment: Qt.AlignRight
+                        spacing: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents.Label {
+                            text: i18nd(root.dom, "Wi-Fi")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                        }
+
+                        PlasmaComponents.Switch {
+                            id: chaveRadio
+                            checked: root.radioLigado
+                            // `onToggled`, não `onCheckedChanged`: este último
+                            // dispara também quando a leitura do sistema muda
+                            // o estado, e o widget mandaria desligar sozinho.
+                            onToggled: root.alternarRadio(checked)
+                        }
                     }
+
+                    Item { Layout.preferredHeight: Kirigami.Units.smallSpacing }
+
+                    PlasmaComponents.Label {
+                        Layout.alignment: Qt.AlignRight
+                        text: "↓  " + root.textoTaxa(root.taxaDown)
+                        font: Kirigami.Theme.smallFont
+                    }
+
+                    PlasmaComponents.Label {
+                        Layout.alignment: Qt.AlignRight
+                        text: "↑  " + root.textoTaxa(root.taxaUp)
+                        font: Kirigami.Theme.smallFont
+                    }
+
+                }
+            }
+
+            // Canal e endereços na MESMA linha, ocupando a largura INTEIRA da
+            // janela — e não dentro da coluna de textos, como ficou na
+            // primeira tentativa: ali dentro esta linha empurrava a coluna do
+            // interruptor e das taxas para fora do quadro.
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaComponents.Label {
+                    visible: root.conectado && root.canal.length > 0
+                    text: i18nd(root.dom, "Channel %1  ·  %2",
+                                root.canal, root.largura)
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    elide: Text.ElideRight
+                    Layout.minimumWidth: 0
+                }
+
+                Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+
+                PlasmaComponents.Label {
+                    visible: root.ip.length > 0
+                    text: root.gateway.length > 0
+                        ? i18nd(root.dom, "ip %1   gw %2", root.ip, root.gateway)
+                        : i18nd(root.dom, "ip %1", root.ip)
+                    horizontalAlignment: Text.AlignRight
+                    opacity: 0.65
+                    font: Kirigami.Theme.smallFont
+                    // Corte pela ESQUERDA: num endereço, o fim é o que
+                    // identifica — perder "192.168." dói menos que perder
+                    // ".96/24".
+                    elide: Text.ElideLeft
+                    Layout.minimumWidth: 0
                 }
             }
 
