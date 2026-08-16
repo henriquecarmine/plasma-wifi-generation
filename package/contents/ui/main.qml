@@ -190,7 +190,19 @@ PlasmoidItem {
         let t = dev;
         if (gw && gw.length > 0)    t += "  ·  " + i18nd(dom, "gateway %1", gw);
         if (saida && saida.length > 0) t += "  ·  " + i18nd(dom, "out %1", saida);
-        return t + "\n" + i18nd(dom, "Click to copy");
+        return t + "\n" + (root.copiado ? i18nd(dom, "Copied")
+                                        : i18nd(dom, "Click to copy"));
+    }
+
+    // A confirmação da cópia vive na PRÓPRIA dica, onde o olho já está, e
+    // apaga sozinha. Escrita como linha no balão, ela empurrava a lista para
+    // baixo e ficava lá pedindo para ser lida de novo — aviso que sobrevive
+    // ao momento vira ruído.
+    property bool copiado: false
+    Timer {
+        id: relogioCopia
+        interval: 1600
+        onTriggered: root.copiado = false
     }
 
     // Copiar sem depender de programa externo: um TextEdit escondido leva o
@@ -210,7 +222,8 @@ PlasmoidItem {
         transferencia.text = t;
         transferencia.selectAll();
         transferencia.copy();
-        root.avisoAcao = i18nd(dom, "Copied: %1", t);
+        root.copiado = true;
+        relogioCopia.restart();
     }
 
     function medirTaxa(saida) {
