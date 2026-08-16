@@ -1,5 +1,19 @@
 %global plasmoid_id com.henrique.wifigeracao
 
+# NÃO grampear a data dos arquivos na data do changelog.
+#
+# O Fedora normaliza a mtime de tudo que entra no pacote para o
+# SOURCE_DATE_EPOCH, que sai da data da última entrada do changelog — bom para
+# compilação reprodutível, veneno para quem reconstrói o mesmo pacote no mesmo
+# dia. O cache compilado de QML do Qt decide se está velho olhando a mtime do
+# fonte: com a data grampeada, dois pacotes diferentes chegam ao disco com a
+# MESMA mtime, e o painel continua executando o QML anterior.
+#
+# Isso custou uma tarde: o disco tinha o arquivo novo, o `grep` provava que o
+# tipo removido não estava mais lá, e o Plasma insistia em "BarraSinal is not
+# a type" — de um cache de 18:59 que ninguém tinha como suspeitar.
+%global clamp_mtime_to_source_date_epoch 0
+
 Name:           plasma-applet-wifi-generation
 Version:        1.7
 Release:        1%{?dist}
@@ -62,18 +76,26 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 
 %changelog
 * Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.7-1
-- The network list became a TABLE: name, access point, generation and signal
-  in fixed columns, under a header that names them. Ragged columns are read
-  one row at a time; aligned ones are read straight down, and the whole point
-  of a list is the comparison.
-- Signal is a four-step meter that takes colour only at the extremes — green
-  above -55 dBm, red below -80, theme colour in between. A continuous
-  green-to-red gradient paints most networks amber and turns the eye to
-  matching hues instead of counting steps.
+- The network list became a TABLE: the name on the left, then the same fan
+  symbol the tray shows — arcs for strength, generation number inside — the
+  percentage and the checkbox. Every column but the name has a fixed width,
+  so they begin at the same place on every row.
+- The fan replaced two columns of text, one for the radio address and one
+  spelling out "Wi-Fi 6". A symbol already read every day on the panel says
+  the same thing in a square, and the address only tells rows apart when
+  several carry the same name — so it appears only in that mode.
 - One row per ACCESS POINT rather than per name, with a button that shows
-  every radio. It is the only way to see a repeater standing beside the main
-  unit — and a checkbox on the row ties the connection to one of them, for
-  the day the configuration page lives on the other side of the house.
+  routers and repeaters. It is the only way to see a repeater standing beside
+  the main unit — and a checkbox on the row ties the connection to one of
+  them, for the day the configuration page lives on the other side of the
+  house.
+- The address, gateway and public IP are in the interface row's tooltip, and
+  clicking the row copies the three. Reading an address off a screen to type
+  it somewhere else is how a digit gets lost.
+- File mtimes are no longer clamped to the changelog date. Fedora normalises
+  them for reproducible builds; Qt's compiled-QML cache decides staleness by
+  the source mtime, so two different builds of the same version reached the
+  disk stamped identically and the panel kept running the previous QML.
 - The address panel now answers the whole question in one line: the address
   this machine holds, the gateway it leaves through, and the address the
   internet sees. It replaces a "dhcp" badge whose number was drawn grey on

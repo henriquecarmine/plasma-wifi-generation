@@ -149,12 +149,68 @@ PlasmoidItem {
                 interfaces.setProperty(achou, "gw",   dados.gw);
                 interfaces.setProperty(achou, "link", dados.link);
             } else {
-                dados.down = 0; dados.up = 0;
+                dados.down = 0; dados.up = 0; dados.saida = "";
                 interfaces.append(dados);
             }
         }
         for (let k = interfaces.count - 1; k >= 0; k--)
             if (!vistos[interfaces.get(k).dev]) interfaces.remove(k);
+        if (root.expanded) root.pedirSaidas();
+    }
+
+    // O IP com que cada interface aparece na internet.
+    //
+    // Pergunta a um serviço EXTERNO, então é feita uma única vez por abertura
+    // do balão e só para interface que tenha gateway — sem saída não há o que
+    // perguntar. Num widget que passa o dia aberto de vez em quando, isso é
+    // uma consulta por vez que se olha; num laço de 15 segundos seria avisar
+    // um servidor de fora a cada vez que a máquina respira.
+    property var pediuSaida: ({})
+
+    function pedirSaidas() {
+        for (let i = 0; i < interfaces.count; i++) {
+            const it = interfaces.get(i);
+            if (!it.gw || it.gw.length === 0) continue;
+            if (root.pediuSaida[it.dev]) continue;
+            root.pediuSaida[it.dev] = true;
+            exec.connectSource(cmd("--saida " + it.dev));
+        }
+    }
+
+    function saidaDe(dev) {
+        for (let i = 0; i < interfaces.count; i++)
+            if (interfaces.get(i).dev === dev) return interfaces.get(i).saida || "";
+        return "";
+    }
+
+    // Dica da linha da interface: quem é, por onde sai e com que cara aparece
+    // lá fora. O gateway mora aqui desde que se mediu que, na linha, ele era
+    // o dado mais largo e o menos consultado.
+    function dicaInterface(dev, gw, saida) {
+        let t = dev;
+        if (gw && gw.length > 0)    t += "  ·  " + i18nd(dom, "gateway %1", gw);
+        if (saida && saida.length > 0) t += "  ·  " + i18nd(dom, "out %1", saida);
+        return t + "\n" + i18nd(dom, "Click to copy");
+    }
+
+    // Copiar sem depender de programa externo: um TextEdit escondido leva o
+    // texto ao mesmo QClipboard que o resto da área de trabalho usa. A
+    // alternativa seria chamar `wl-copy`, que nem toda instalação tem — e
+    // widget não deve exigir pacote para um botão de copiar.
+    TextEdit {
+        id: transferencia
+        visible: false
+        width: 0
+        height: 0
+    }
+
+    function copiarEndereco(ip, gw, saida) {
+        const t = i18nd(dom, "IP %1 · gateway %2 · out %3",
+                        ip || "—", gw || "—", saida || "—");
+        transferencia.text = t;
+        transferencia.selectAll();
+        transferencia.copy();
+        root.avisoAcao = i18nd(dom, "Copied: %1", t);
     }
 
     function medirTaxa(saida) {
@@ -247,15 +303,15 @@ PlasmoidItem {
         root.cfgDev = dev;
         root.avisoAcao = "";
         root.cfgNovo = "";
-        root.cfgSaida = "";
-        // O IP de saída é pergunta à INTERNET, com até 4 s de espera. Só ao
-        // abrir o formulário, nunca no laço de leitura: um widget de bandeja
-        // que consulta um servidor externo a cada poucos segundos é um
-        // vazamento de presença, além de tráfego sem leitor.
-        root.cfgSaidaPerguntada = true;
+        // O IP de saída já costuma ter sido perguntado quando o balão abriu.
+        // Perguntar de novo aqui seria segunda consulta externa para a mesma
+        // resposta.
+        root.cfgSaida = root.saidaDe(dev);
+        root.cfgSaidaPerguntada = root.cfgSaida.length === 0;
+        if (root.cfgSaidaPerguntada)
+            exec.connectSource(cmd("--saida " + dev));
         exec.connectSource(cmd("--perfil " + dev));
         exec.connectSource(cmd("--enderecos " + dev));
-        exec.connectSource(cmd("--saida " + dev));
     }
 
     function sugerirEndereco() {
@@ -367,8 +423,17 @@ PlasmoidItem {
             } else if (source.indexOf("--taxa") >= 0) {
                 root.medirTaxa(saida);
             } else if (source.indexOf("--saida") >= 0) {
-                root.cfgSaidaPerguntada = false;
-                root.cfgSaida = saida;
+                // A resposta não diz de quem é: quem diz é o comando que a
+                // pediu. Com duas interfaces, guardar no lugar errado
+                // mostraria o IP do cabo na linha do wifi.
+                const dev = source.substring(source.indexOf("--saida") + 8).trim();
+                for (let i = 0; i < interfaces.count; i++)
+                    if (interfaces.get(i).dev === dev)
+                        interfaces.setProperty(i, "saida", saida);
+                if (dev === root.cfgDev) {
+                    root.cfgSaidaPerguntada = false;
+                    root.cfgSaida = saida;
+                }
             } else if (source.indexOf("--desfixar") >= 0) {
                 // Resposta própria: "Conectado a X" seria mentira aqui, já
                 // que soltar a amarra de propósito não reconecta nada.
@@ -490,14 +555,13 @@ PlasmoidItem {
         }
     }
 
-    // Degraus acesos a partir da potência medida. Os cortes são os que a
-    // prática do wifi usa: −55 é sinal folgado, −67 ainda é bom para vídeo,
-    // −75 é onde a coisa começa a travar.
-    function nivelSinal(dbm, pct) {
-        if (dbm === 0) return pct >= 75 ? 4 : pct >= 55 ? 3 : pct >= 35 ? 2 : 1;
-        if (dbm >= -55) return 4;
-        if (dbm >= -67) return 3;
-        if (dbm >= -75) return 2;
+    // Arcos acesos de cada rede da lista, pela potência medida. Os cortes são
+    // os da prática: −60 é sinal folgado, −72 ainda serve para vídeo, abaixo
+    // disso começa a travar. Nunca zero: rede que aparece na lista existe.
+    function arcos(dbm, pct) {
+        if (dbm === 0) return pct >= 67 ? 3 : pct >= 40 ? 2 : 1;
+        if (dbm >= -60) return 3;
+        if (dbm >= -72) return 2;
         return 1;
     }
 
@@ -574,6 +638,8 @@ PlasmoidItem {
             // Zera as bases: com a leitura anterior de minutos atrás, a
             // primeira taxa sairia como média do intervalo inteiro.
             root.contadores = ({});
+            // Uma consulta externa por abertura, não por leitura.
+            root.pediuSaida = ({});
             root.lerRede();
             root.lerRadio();
             root.avisoAcao = "";
@@ -645,13 +711,21 @@ PlasmoidItem {
             Math.max(redes.count, 1) * alturaLinha,
             Kirigami.Units.gridUnit * 14)   // ceiling: then it scrolls
 
-        // Larguras das colunas da lista, num lugar só. Cabeçalho e linhas
-        // leem daqui: definidas em cada um, bastava mexer numa para o título
-        // sair de cima da coluna que ele nomeia.
-        readonly property int colPonto:   Math.round(Kirigami.Units.gridUnit * 7.0)
-        readonly property int colGeracao: Math.round(Kirigami.Units.gridUnit * 3.4)
-        readonly property int colSinal:   Math.round(Kirigami.Units.gridUnit * 3.6)
-        readonly property int colFim:     Math.round(Kirigami.Units.gridUnit * 3.2)
+        // Larguras fixas das colunas da lista, num lugar só.
+        //
+        // LIÇÃO CARA, paga com o nome de TODAS as redes sumindo da tela: a
+        // coluna elástica não pode pedir `Layout.preferredWidth: 0`. O Qt
+        // reparte a sobra entre os itens com `fillWidth` em PROPORÇÃO ao
+        // tamanho preferido de cada um — pedindo zero, a fatia é zero, e o
+        // nome ficou com largura nenhuma enquanto o resto se acomodava.
+        //
+        // O que alinha é o contrário: prender cada coluna fixa com mínimo
+        // IGUAL ao preferido, e deixar o nome com `fillWidth` e mínimo zero.
+        // Assim a variação toda cai num lugar só — o nome, que tem reticências
+        // para isso — e as outras colunas começam no mesmo x em toda linha.
+        readonly property int colSimbolo: Kirigami.Units.iconSizes.medium
+        readonly property int colPct:     Math.round(Kirigami.Units.gridUnit * 2.6)
+        readonly property int colMac:     Math.round(Kirigami.Units.gridUnit * 7.0)
 
         // implicitWidth/Height, not just the Layout hints. An Item with no
         // implicit size opens the popup at zero by zero: the click works,
@@ -854,14 +928,17 @@ PlasmoidItem {
                         Layout.minimumWidth: 0
 
                         PlasmaComponents.ToolTip.visible: areaDica.containsMouse
-                        PlasmaComponents.ToolTip.text: model.gw.length > 0
-                            ? i18nd(root.dom, "%1 · gateway %2", model.dev, model.gw)
-                            : model.dev
+                        PlasmaComponents.ToolTip.text:
+                            root.dicaInterface(model.dev, model.gw, model.saida)
+                        // Clicar copia a linha inteira — endereço, gateway e
+                        // IP de saída. É o que se digita em chamado de
+                        // suporte, e digitar à mão um IP lido na tela é como
+                        // se erra um dígito.
                         MouseArea {
                             id: areaDica
                             anchors.fill: parent
                             hoverEnabled: true
-                            acceptedButtons: Qt.NoButton
+                            onClicked: root.copiarEndereco(model.ip, model.gw, model.saida)
                         }
                     }
 
@@ -1180,31 +1257,32 @@ PlasmoidItem {
                     Layout.fillWidth: true
                 }
 
+                // "Varrendo…" ocupa lugar SEMPRE, aceso ou apagado. Com
+                // `visible`, a palavra nascia e morria a cada varredura e
+                // empurrava os dois botões para os lados — botão que se mexe
+                // é botão em que se erra o clique.
                 PlasmaComponents.Label {
-                    visible: root.varrendo
+                    opacity: root.varrendo ? 0.6 : 0.0
                     text: i18nd(root.dom, "scanning…")
                     font: Kirigami.Theme.smallFont
-                    opacity: 0.6
                 }
 
-                // Ver cada rádio separadamente. Ao lado da varredura porque é
-                // a mesma pergunta feita com outra lente, e porque quem liga
+                // Ver cada aparelho separadamente. Ao lado da varredura porque
+                // é a mesma pergunta feita com outra lente, e porque quem liga
                 // isto quase sempre varre em seguida.
                 PlasmaComponents.ToolButton {
                     icon.name: "view-list-details"
                     checkable: true
                     checked: root.mostrarTodos
                     display: PlasmaComponents.AbstractButton.IconOnly
-                    text: i18nd(root.dom, "Show every access point")
+                    text: i18nd(root.dom, "Show routers and repeaters")
                     onToggled: {
                         root.mostrarTodos = checked;
                         root.lerRedes();      // cache: a lista muda na hora
                         root.varrerRedes();   // e a varredura confirma
                     }
                     PlasmaComponents.ToolTip.visible: hovered
-                    PlasmaComponents.ToolTip.text: root.mostrarTodos
-                        ? i18nd(root.dom, "Showing every radio, repeaters included")
-                        : i18nd(root.dom, "Show every radio, repeaters included")
+                    PlasmaComponents.ToolTip.text: i18nd(root.dom, "Show routers and repeaters")
                 }
 
                 PlasmaComponents.ToolButton {
@@ -1216,62 +1294,6 @@ PlasmoidItem {
                     PlasmaComponents.ToolTip.visible: hovered
                     PlasmaComponents.ToolTip.text: i18nd(root.dom, "Scan again")
                 }
-            }
-
-            // Cabeçalho das colunas. Sem ele, "wifi_zone / 02:eb:… / Wi-Fi 6
-            // / 82%" é uma fileira de dados soltos que cada pessoa decifra
-            // sozinha; com ele, a lista se explica na primeira olhada.
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                Layout.rightMargin: Kirigami.Units.smallSpacing
-                spacing: Kirigami.Units.smallSpacing
-                visible: redes.count > 0
-
-                // A coluna do nome pede LARGURA ZERO e cresce com a sobra.
-                //
-                // Com a largura natural do texto, um nome comprido — o da
-                // impressora, "DIRECT-2E-HP DeskJet 2700 series" — fazia a
-                // soma passar da janela, e o layout tirava alguns pixels de
-                // TODAS as colunas para caber. O resultado era uma tabela em
-                // que cada linha começava as colunas num lugar diferente:
-                // exatamente o defeito que a tabela vinha corrigir.
-                PlasmaComponents.Label {
-                    text: i18nd(root.dom, "Network")
-                    font: Kirigami.Theme.smallFont
-                    opacity: 0.5
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 0
-                    Layout.minimumWidth: 0
-                }
-                PlasmaComponents.Label {
-                    text: i18nd(root.dom, "Access point")
-                    font: Kirigami.Theme.smallFont
-                    opacity: 0.5
-                    elide: Text.ElideRight
-                    Layout.preferredWidth: janela.colPonto
-                    Layout.minimumWidth: janela.colPonto
-                }
-                PlasmaComponents.Label {
-                    text: i18nd(root.dom, "Generation")
-                    font: Kirigami.Theme.smallFont
-                    opacity: 0.5
-                    elide: Text.ElideRight
-                    Layout.preferredWidth: janela.colGeracao
-                    Layout.minimumWidth: janela.colGeracao
-                }
-                PlasmaComponents.Label {
-                    text: i18nd(root.dom, "Signal")
-                    font: Kirigami.Theme.smallFont
-                    opacity: 0.5
-                    horizontalAlignment: Text.AlignRight
-                    Layout.preferredWidth: janela.colSinal
-                    Layout.minimumWidth: janela.colSinal
-                }
-                // Espaço da caixinha e do cadeado, para o cabeçalho terminar
-                // onde as linhas terminam.
-                Item { Layout.preferredWidth: janela.colFim }
             }
 
             // ---- the network list ----------------------------------------
@@ -1319,90 +1341,82 @@ PlasmoidItem {
                         }
                     }
 
-                    // COLUNAS de largura fixa, e só o nome é elástico. Antes,
-                    // cada campo ocupava o tamanho do próprio texto: a
-                    // geração encostava na potência numa linha e ficava longe
-                    // dela na seguinte, e nada se lia na vertical. Com a
-                    // largura presa, o olho desce a coluna em vez de procurar
-                    // cada número.
+                    // Quatro colunas, e só o NOME é elástico. As demais têm
+                    // mínimo igual ao preferido, então começam sempre no mesmo
+                    // x; a variação de comprimento cai toda no nome, que tem
+                    // reticências justamente para isso.
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: Kirigami.Units.smallSpacing
                         anchors.rightMargin: Kirigami.Units.smallSpacing
                         spacing: Kirigami.Units.smallSpacing
 
-                        // Largura zero e cresce com a sobra — ver o cabeçalho.
                         PlasmaComponents.Label {
                             text: model.nome
                             elide: Text.ElideRight
                             Layout.fillWidth: true
-                            Layout.preferredWidth: 0
                             Layout.minimumWidth: 0
                             font.bold: model.emUso
                         }
 
-                        // O endereço do rádio. É o que distingue duas linhas
-                        // de mesmo nome quando os repetidores aparecem — sem
-                        // ele, "conectar somente a este" não teria a quem se
-                        // referir.
+                        // O endereço do rádio aparece SÓ no modo que mostra
+                        // roteadores e repetidores. Fora dele, cada linha tem
+                        // um nome diferente e o endereço é ruído; dentro dele,
+                        // é a única coisa que distingue três linhas chamadas
+                        // "wifi_zone" — e é a quem a caixinha se refere.
                         PlasmaComponents.Label {
+                            visible: root.mostrarTodos
                             text: model.bssid
                             font: Kirigami.Theme.smallFont
-                            opacity: 0.5
+                            opacity: 0.45
                             elide: Text.ElideRight
-                            Layout.preferredWidth: janela.colPonto
-                            Layout.minimumWidth: janela.colPonto
+                            Layout.preferredWidth: janela.colMac
+                            Layout.minimumWidth: janela.colMac
+                            Layout.maximumWidth: janela.colMac
                         }
 
-                        // "Wi-Fi 6" por extenso, não o número solto. O número
-                        // sozinho economizava espaço que a coluna já tem, e
-                        // exigia saber de antemão o que ele significava.
+                        // O MESMO símbolo da bandeja: leque com o número da
+                        // geração dentro. Antes eram duas colunas — endereço e
+                        // "Wi-Fi 6" escrito — para dizer o que este desenho já
+                        // diz num quadrado, e que o dono da máquina lê todo dia
+                        // no relógio. Um símbolo aprendido uma vez vale mais
+                        // que duas colunas de texto.
+                        SimboloWifi {
+                            barras: root.arcos(model.dbm, model.sinalPct)
+                            numero: model.geracao
+                            tamanho: janela.colSimbolo
+                            Layout.preferredWidth:  janela.colSimbolo
+                            Layout.minimumWidth:    janela.colSimbolo
+                            Layout.maximumWidth:    janela.colSimbolo
+                            Layout.preferredHeight: janela.colSimbolo
+
+                            PlasmaComponents.ToolTip.visible: areaGer.containsMouse
+                            PlasmaComponents.ToolTip.text:
+                                (model.geracao.length > 0
+                                    ? i18nd(root.dom, "Wi-Fi %1", model.geracao) + "  ·  "
+                                    : "")
+                                + model.bssid + "  ·  " + model.dbm + " dBm"
+                            MouseArea {
+                                id: areaGer
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
+                        }
+
                         PlasmaComponents.Label {
-                            text: model.geracao.length > 0
-                                ? i18nd(root.dom, "Wi-Fi %1", model.geracao)
-                                : "—"
+                            // Percentual não passa por catálogo: "%1%" fazia o gettext desconfiar
+                            // do "%" final e rebaixar a tradução a fuzzy — e fuzzy fica em inglês.
+                            text: model.sinalPct + "%"
+                            opacity: 0.6
                             font: Kirigami.Theme.smallFont
-                            opacity: model.geracao.length > 0 ? 0.75 : 0.35
-                            elide: Text.ElideRight
-                            Layout.preferredWidth: janela.colGeracao
-                            Layout.minimumWidth: janela.colGeracao
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: janela.colPct
+                            Layout.minimumWidth:   janela.colPct
+                            Layout.maximumWidth:   janela.colPct
                         }
 
-                        RowLayout {
-                            Layout.preferredWidth: janela.colSinal
-                            Layout.minimumWidth: janela.colSinal
-                            spacing: Kirigami.Units.smallSpacing
-
-                            BarraSinal {
-                                nivel: root.nivelSinal(model.dbm, model.sinalPct)
-                                dbm: model.dbm
-                                Layout.preferredWidth:  Kirigami.Units.iconSizes.small
-                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                            }
-
-                            PlasmaComponents.Label {
-                                // Percentual não passa por catálogo: "%1%" fazia o gettext desconfiar
-                                // do "%" final e rebaixar a tradução a fuzzy — e fuzzy fica em inglês.
-                                text: model.sinalPct + "%"
-                                opacity: 0.6
-                                font: Kirigami.Theme.smallFont
-                                horizontalAlignment: Text.AlignRight
-                                Layout.fillWidth: true
-                                Layout.minimumWidth: 0
-
-                                PlasmaComponents.ToolTip.visible: areaSinal.containsMouse
-                                PlasmaComponents.ToolTip.text:
-                                    i18nd(root.dom, "%1 dBm — measured strength", model.dbm)
-                                MouseArea {
-                                    id: areaSinal
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.NoButton
-                                }
-                            }
-                        }
-
-                        // "Conectar somente a este ponto."
+                        // "Conectar só neste roteador."
                         //
                         // Numa casa com repetidor, o NetworkManager entra
                         // pelo sinal mais forte — que é o repetidor, e não o
@@ -1423,7 +1437,7 @@ PlasmoidItem {
                                 : root.soltarPonto(model.nome)
                             PlasmaComponents.ToolTip.visible: hovered
                             PlasmaComponents.ToolTip.text: model.salva
-                                ? i18nd(root.dom, "Connect only to this access point")
+                                ? i18nd(root.dom, "Connect only to this router")
                                 : i18nd(root.dom, "Save the network first")
                         }
 
@@ -1450,26 +1464,19 @@ PlasmoidItem {
                 Layout.minimumHeight: 0
             }
 
-            // A legenda explica os dois símbolos da lista. Ícone que precisa
-            // de explicação ou ganha legenda, ou vira adivinhação — e quem
-            // usa este widget nem sempre é quem o escreveu.
+            // A legenda ensina os três símbolos da lista, em três frases
+            // curtas. Ícone que precisa de explicação ou ganha legenda, ou
+            // vira adivinhação — e quem usa este widget nem sempre é quem o
+            // escreveu.
             PlasmaComponents.Label {
-                text: i18nd(root.dom,
-                    "Dimmed padlock: network not saved yet — opens settings for the password.")
+                text: i18nd(root.dom, "Number in the fan: Wi-Fi generation.")
+                    + "  " + i18nd(root.dom, "Dimmed padlock: network not saved.")
+                    + "  " + i18nd(root.dom, "Checkbox: stay on this router.")
                 font: Kirigami.Theme.smallFont
                 opacity: 0.5
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.smallSpacing
-            }
-
-            PlasmaComponents.Label {
-                text: i18nd(root.dom,
-                    "Checkbox: stay on this exact access point — for homes with a repeater.")
-                font: Kirigami.Theme.smallFont
-                opacity: 0.5
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
             }
         }
     }
