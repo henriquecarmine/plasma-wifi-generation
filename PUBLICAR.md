@@ -1,8 +1,38 @@
-# Texto pronto para o anúncio no store.kde.org
+# Publicar no store.kde.org
 
 **Categoria:** Plasma 6 Add-Ons → Plasma Widgets
 **Licença:** MIT
-**Arquivo a enviar:** `wifi-generation-1.2.plasmoid`
+**Arquivo a enviar:** `dist/wifi-generation.plasmoid`
+**Repositório:** https://github.com/henriquecarmine/plasma-wifi-generation
+
+O arquivo **não leva versão no nome** de propósito: a loja lê a versão do
+`metadata.json` dentro do pacote, e repetir o número no nome quebraria todo
+caminho escrito a cada lançamento.
+
+## O passo que só você pode dar
+
+O envio é pela **página da loja, com login**. Não existe caminho de linha de
+comando com as credenciais que estão nesta máquina, então o `.plasmoid`, os
+textos e as capturas ficam prontos aqui e o clique final é seu:
+
+1. Entrar em https://store.kde.org — **e-mail e senha**, não o botão do
+   Google. O login social do Chrome já está preso na conta `cesar.school` e
+   escolhe ela sozinha; o formulário comum aceita `henriquecarmine@gmail.com`
+   como texto e não tem como errar.
+2. *Add Product* → categoria **Plasma 6 Add-Ons → Plasma Widgets**.
+3. Colar título, resumo, descrição e tags daqui.
+4. Enviar `dist/wifi-generation.plasmoid` e as duas capturas de
+   `screenshots/`.
+
+## Capturas
+
+- `screenshots/01-tray.png` — o ícone na bandeja, entre os vizinhos.
+- `screenshots/02-popup.png` — a janela aberta, com a lista de redes.
+
+A segunda foi refeita nesta versão. A anterior mostrava, sem querer, o **IP
+público da máquina** numa dica aberta — atirar isso numa loja pública é
+diferente de mostrá-lo na própria tela. Vale conferir isso em toda captura
+nova: dica aberta, endereço de saída e nome de rede vizinha.
 
 ---
 
@@ -53,10 +83,34 @@ WHAT IT SHOWS
 
 - Tray: the Wi-Fi fan with the generation number overlaid. Arcs light up with
   signal strength; a weak link still LOOKS connected, with translucent arcs
-  instead of blank ones.
+  instead of blank ones. With a cable and Wi-Fi carrying DIFFERENT gateways
+  at once, a dot in the corner says so — the same gateway on both is one exit
+  reached by two paths, and is not drawn as two.
 - Tooltip: generation, network, speed and signal.
-- On click: band, channel, width, up/down rate, signal in dBm with a
-  plain-language quality, and the list of nearby networks sorted by signal.
+- On click: band, channel, width, up/down rate, and signal in dBm with a
+  plain-language quality.
+- One row per interface, wired included: the medium on the left, live
+  download and upload in the middle, the address on the right. The row's
+  tooltip carries the gateway and the address the internet sees, and clicking
+  the row copies the three.
+- The network list as a table: the name, then the same fan symbol with the
+  generation of THAT network inside, the percentage, and a checkbox. Every
+  column but the name has a fixed width, so they begin at the same place on
+  every row.
+- A button that shows routers and repeaters instead of only the strongest of
+  each name — the only way to see a repeater standing beside the unit it
+  repeats. Alphabetical there, by signal in the normal list. The checkbox
+  ties the connection to one exact radio, for the day the configuration page
+  lives on the other side of the house.
+- Addresses as a list per interface: add, remove, and a suggest button that
+  offers a free address verified by ping. A static address can be hung on an
+  interface WITHOUT leaving DHCP, which is how you reach a factory-default
+  router without dropping the network you are on.
+
+The generation of each scanned network comes from the kernel's scan cache via
+`iw scan dump`, which runs without root. It is remembered between scans,
+because that cache holds only the last one while NetworkManager lists
+networks heard minutes ago.
 
 CONNECTING
 
@@ -87,23 +141,5 @@ catalogue into contents/locale/<lang>/LC_MESSAGES/.
 ## Tags
 
 ```
-wifi, network, systray, indicator, networkmanager, wifi6, plasma6
+wifi, network, systray, indicator, networkmanager, wifi6, repeater, plasma6
 ```
-
----
-
-## O que ainda depende de você
-
-**Capturas de tela.** A loja mostra o anúncio muito melhor com duas: o ícone
-na bandeja e a janela aberta com a lista de redes. Posso gerar.
-
-**Repositório público.** A URL declarada no RPM é
-`https://github.com/henriquecarmine/plasma-wifi-generation` e ainda não
-existe. Ou cria o repositório, ou tira a URL — link quebrado num anúncio pega
-mal, e a loja costuma pedir a origem do código.
-
-## Cadastro
-
-Use **e-mail e senha**, não o botão do Google. O login social do Chrome já
-está preso na conta `cesar.school` e escolhe ela sozinha; o formulário comum
-aceita `henriquecarmine@gmail.com` como texto e não tem como errar.
