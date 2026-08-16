@@ -34,10 +34,18 @@ endereço, amarra a conexão a um ponto de acesso.
 `artwork/logo-indicador.svg` é a mesma marca sem os cursores, para quando só
 couber o símbolo.
 
-Só o SVG fica versionado; o PNG se gera na hora, como os catálogos:
+**O que a loja aceita é PNG**, então o PNG vai versionado ao lado do vetor —
+`artwork/logo.png` (512), `artwork/logo-256.png` e
+`artwork/logo-indicador.png`. Arquivo que se envia num formulário precisa
+estar pronto na hora do clique; mandar quem publica rodar um comando antes é
+convite para subir a marca errada.
+
+Editou o SVG? Regere os três, senão eles passam a mentir:
 
 ```bash
-magick -background none artwork/logo.svg -resize 512x512 -depth 8 logo.png
+magick -background none artwork/logo.svg           -resize 512x512 -depth 8 artwork/logo.png
+magick -background none artwork/logo.svg           -resize 256x256 -depth 8 artwork/logo-256.png
+magick -background none artwork/logo-indicador.svg -resize 512x512 -depth 8 artwork/logo-indicador.png
 ```
 
 O vão em volta do "6" é **máscara**, não tinta da cor do fundo: o fundo é
