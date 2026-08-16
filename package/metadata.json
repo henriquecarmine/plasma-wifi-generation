@@ -1,0 +1,20 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Henrique Carmine"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Shows which Wi-Fi generation is in use (4/5/6/6E/7) and the real negotiated speed, read from the kernel — data NetworkManager does not expose.",
+        "Icon": "network-wireless",
+        "Id": "com.henrique.wifigeracao",
+        "License": "MIT",
+        "Name": "Wi-Fi Generation",
+        "Version": "1.2"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-NotificationArea": "true",
+    "X-Plasma-NotificationAreaCategory": "Hardware"
+}

@@ -1,0 +1,184 @@
+#!/usr/bin/bash
+# Wi-Fi generation and real negotiated speed, read from the kernel.
+#
+# Why this exists: NetworkManager does not expose the Wi-Fi generation in any
+# field (checked 2026-08-15: the AP field list runs from NAME to DBUS-PATH and
+# has no generation). Plasma's network applet reads everything from
+# NetworkManager, so it has nowhere to take that from. The kernel knows, via
+# nl80211 — which is what `iw` queries.
+#
+# The prefix of the negotiated bitrate gives the generation away:
+#   EHT = Wi-Fi 7 (802.11be) · HE = Wi-Fi 6/6E (802.11ax)
+#   VHT = Wi-Fi 5 (802.11ac) · MCS = Wi-Fi 4 (802.11n)
+# No prefix at all means 802.11a/b/g, before Wi-Fi 4.
+#
+# OUTPUT CONTRACT — this script emits STABLE TOKENS, never prose.
+# Words shown to the user are translated in QML, where gettext can reach
+# them. A shell script cannot be put through a message catalogue, so any
+# human-readable string produced here would be permanently untranslatable.
+set -uo pipefail
+
+# Saved Wi-Fi profiles, one per line, as "ssid<TAB>profile_name".
+#
+# The PROFILE name is not the SSID. Comparing an SSID against a profile name
+# makes a saved network look new, and the click then tries to bring up a
+# profile that does not exist.
+_wifi_profiles() {
+	/usr/bin/nmcli -t -f NAME,TYPE connection show 2>/dev/null \
+	| awk -F: '$NF ~ /wireless/ { NF--; print }' OFS=: \
+	| while IFS= read -r name; do
+		[ -n "$name" ] || continue
+		s=$(/usr/bin/nmcli -g 802-11-wireless.ssid connection show "$name" 2>/dev/null)
+		[ -n "$s" ] && printf '%s\t%s\n' "$s" "$name"
+	done
+}
+
+# --connect <ssid>: bring up an ALREADY SAVED connection, and say what happened.
+#
+# Lives here, not in a command line assembled in QML, for two reasons: the
+# nmcli path stays absolute (Plasma's "executable" engine does not guarantee
+# PATH), and the error is CAPTURED instead of discarded. The first version
+# called nmcli straight from the widget without looking at output or exit
+# code — it failed silently, which is the costliest kind of defect.
+#
+# Emits "OK|<detail>" or "FAIL|<detail>". The detail comes from nmcli, which
+# is itself localised by the system, so it is passed through untouched.
+if [ "${1:-}" = "--connect" ]; then
+	target="${2:-}"
+	[ -n "$target" ] || { echo "FAIL|noname"; exit 1; }
+	profile=$(_wifi_profiles | awk -F'\t' -v a="$target" '$1==a {print $2; exit}')
+	out=$(/usr/bin/nmcli con up id "${profile:-$target}" 2>&1); rc=$?
+	# On-disk trail: without it, "I clicked and nothing happened" cannot be
+	# diagnosed from outside — no way to tell whether the click arrived, the
+	# command ran, or what nmcli answered.
+	{
+		echo "--- $(date '+%F %T') ---"
+		echo "requested: $target"
+		echo "profile  : ${profile:-(none, used the ssid itself)}"
+		echo "rc       : $rc"
+		echo "nmcli    : $out"
+	} >> "${XDG_CACHE_HOME:-$HOME/.cache}/wifi-generation.log" 2>/dev/null
+	if [ $rc -eq 0 ]; then
+		echo "OK|$target"
+	else
+		reason=$(printf '%s' "$out" | tail -1 | sed 's/^Error: //')
+		echo "FAIL|${reason:-exit $rc}"
+	fi
+	exit 0
+fi
+
+# --networks [--scan]: one network per line,
+#   "inuse|signal|security|saved|ssid"
+#
+# SSID goes LAST on purpose: it is the only field that may contain a colon,
+# so `cut -f5-` recovers the whole remainder without getting lost.
+#
+# Without --scan this reads NetworkManager's cache, which is instant but goes
+# stale: measured 2026-08-16, a network at 80% signal was simply absent from
+# the cache and came back the moment a scan was requested. A network list
+# without a scan is an old photograph.
+if [ "${1:-}" = "--networks" ]; then
+	if [ "${2:-}" = "--scan" ]; then
+		/usr/bin/nmcli dev wifi rescan >/dev/null 2>&1
+		sleep 4   # rescan returns at once; the results arrive later
+	fi
+	# Matched by SSID, not by profile name — see _wifi_profiles.
+	saved=$(_wifi_profiles | cut -f1)
+	/usr/bin/nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID dev wifi list --rescan no 2>/dev/null \
+	| while IFS= read -r line; do
+		use=$(printf '%s' "$line" | cut -d: -f1)
+		sig=$(printf '%s' "$line" | cut -d: -f2)
+		sec=$(printf '%s' "$line" | cut -d: -f3)
+		ssid=$(printf '%s' "$line" | cut -d: -f4- | sed 's/\\:/:/g')
+		# A nameless network is hidden: there is nothing to click.
+		[ -n "$ssid" ] || continue
+		[ "$use" = "*" ] && use=1 || use=0
+		# "open" is a TOKEN, translated in QML. Anything else is the raw
+		# protocol name (WPA2, WPA3…), which is not translatable anyway.
+		[ -n "$sec" ] && sec_out="$sec" || sec_out="open"
+		if printf '%s\n' "$saved" | grep -qxF "$ssid"; then sav=1; else sav=0; fi
+		printf '%s|%s|%s|%s|%s\n' "$use" "${sig:-0}" "$sec_out" "$sav" "$ssid"
+	done \
+	| sort -t'|' -k2,2nr \
+	| awk -F'|' '!seen[$5]++'   # same network from several APs: keep the strongest
+	exit 0
+fi
+
+IF=$(iw dev 2>/dev/null | awk '/[[:space:]]Interface /{print $2; exit}')
+[ -n "${IF:-}" ] || { echo "nowifi"; exit 0; }
+
+LINK=$(iw dev "$IF" link 2>/dev/null)
+case "$LINK" in
+	*"Not connected"*|"") echo "disconnected"; exit 0 ;;
+esac
+
+rx=$(printf '%s\n' "$LINK" | awk '/rx bitrate:/{print; exit}')
+tx=$(printf '%s\n' "$LINK" | awk '/tx bitrate:/{print; exit}')
+sig=$(printf '%s\n' "$LINK" | awk '/signal:/{print $2; exit}')
+frq=$(printf '%s\n' "$LINK" | awk '/freq:/{print $2; exit}')
+
+# `num` is what goes INSIDE the icon, `gen` is the display name. Both come out
+# ready: letting the widget dig the digit out of the text with a regular
+# expression would render "802" for "802.11 a/b/g".
+gen="unknown"
+num=""
+case "$rx$tx" in
+	*EHT-MCS*) gen="Wi-Fi 7"; num="7" ;;
+	*HE-MCS*)  gen="Wi-Fi 6"; num="6" ;;
+	*VHT-MCS*) gen="Wi-Fi 5"; num="5" ;;
+	*MCS*)     gen="Wi-Fi 4"; num="4" ;;
+	# No MCS at all means 802.11a/b/g. The Wi-Fi Alliance only started naming
+	# at 4, so there is no honest number to show — the icon keeps just the
+	# arcs, which beats inventing a "3".
+	*)         gen="802.11 a/b/g"; num="" ;;
+esac
+
+# 6 GHz is what separates Wi-Fi 6 from 6E. The band starts at 5925 MHz.
+band=""
+if [ -n "${frq:-}" ]; then
+	case "$frq" in *.*) f=${frq%%.*} ;; *) f=$frq ;; esac
+	if   [ "${f:-0}" -ge 5925 ] 2>/dev/null; then band="6"
+	elif [ "${f:-0}" -ge 4900 ] 2>/dev/null; then band="5"
+	else                                          band="2.4"
+	fi
+	if [ "$gen" = "Wi-Fi 6" ] && [ "$band" = "6" ]; then
+		gen="Wi-Fi 6E"
+		num="6E"
+	fi
+fi
+
+vrx=$(printf '%s\n' "$rx" | awk '{for(i=1;i<=NF;i++) if($i=="bitrate:"){printf "%d", $(i+1); exit}}')
+vtx=$(printf '%s\n' "$tx" | awk '{for(i=1;i<=NF;i++) if($i=="bitrate:"){printf "%d", $(i+1); exit}}')
+
+# --detail: "gen|ssid|rx|tx|signal|quality|channel|width|number|band"
+if [ "${1:-}" = "--detail" ]; then
+	ssid=$(printf '%s\n' "$LINK" | awk '/SSID:/{ $1=""; sub(/^ /,""); print; exit}')
+	info=$(iw dev "$IF" info 2>/dev/null)
+	chan=$(printf '%s\n' "$info" | awk '/channel /{for(i=1;i<=NF;i++) if($i=="channel"){print $(i+1); exit}}')
+	# `iw info` prints "width: 80 MHz," — the comma comes glued on and would
+	# leak to the screen if not stripped here.
+	width=$(printf '%s\n' "$info" | awk '/width:/{for(i=1;i<=NF;i++) if($i=="width:"){w=$(i+1)" "$(i+2); gsub(/,$/,"",w); print w; exit}}')
+	# Quality as a TOKEN. dBm alone says nothing to someone outside the
+	# trade, but the words belong in the catalogue, not here.
+	q="unknown"
+	if [ -n "${sig:-}" ]; then
+		s=${sig%%.*}
+		if   [ "$s" -ge -50 ] 2>/dev/null; then q="excellent"
+		elif [ "$s" -ge -60 ] 2>/dev/null; then q="good"
+		elif [ "$s" -ge -67 ] 2>/dev/null; then q="fair"
+		elif [ "$s" -ge -73 ] 2>/dev/null; then q="weak"
+		else                                    q="veryweak"
+		fi
+	fi
+	printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+		"$gen" "${ssid:-}" "${vrx:-}" "${vtx:-}" "${sig:-}" "$q" \
+		"${chan:-}" "${width:-}" "$num" "$band"
+	exit 0
+fi
+
+# Default mode is for humans at a terminal, in English, and is not part of
+# the widget's contract.
+out="$gen"
+[ -n "${vrx:-}" ] && [ -n "${vtx:-}" ] && out="$out · ${vrx}/${vtx} Mb/s"
+[ -n "${sig:-}" ] && out="$out · ${sig} dBm"
+echo "$out"

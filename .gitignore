@@ -1,0 +1,10 @@
+# Saída de compilação: gerada por build.sh a partir dos .po.
+# Catálogo compilado em git é convite a divergir da fonte.
+package/contents/locale/
+
+# Artefatos de distribuição.
+dist/
+
+# Sobras do empacotamento.
+*.tar.gz
+*.rpm

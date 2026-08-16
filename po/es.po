@@ -1,0 +1,93 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Wi-Fi Generation 1.2\n"
+"PO-Revision-Date: 2026-08-16 02:00-0300\n"
+"Last-Translator: Henrique Carmine <henriquecarmine@gmail.com>\n"
+"Language-Team: Spanish\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "excellent"
+msgstr "excelente"
+
+msgid "good"
+msgstr "buena"
+
+msgid "fair"
+msgstr "aceptable"
+
+msgid "weak"
+msgstr "débil"
+
+msgid "very weak"
+msgstr "muy débil"
+
+msgid "unknown"
+msgstr "desconocida"
+
+msgid "2.4 GHz"
+msgstr "2,4 GHz"
+
+msgid "5 GHz"
+msgstr "5 GHz"
+
+msgid "6 GHz"
+msgstr "6 GHz"
+
+msgid "Unknown"
+msgstr "Desconocida"
+
+msgid "open"
+msgstr "abierta"
+
+msgid "No response from the system"
+msgstr "Sin respuesta del sistema"
+
+#, kde-format
+msgid "Connected to %1"
+msgstr "Conectado a %1"
+
+msgid "No network given"
+msgstr "No se indicó ninguna red"
+
+#, kde-format
+msgid "Failed: %1"
+msgstr "Falló: %1"
+
+msgid "No Wi-Fi adapter"
+msgstr "Sin adaptador Wi-Fi"
+
+msgid "Disconnected"
+msgstr "Desconectado"
+
+#, kde-format
+msgid "Connecting to %1…"
+msgstr "Conectando a %1…"
+
+msgid "Opening network settings…"
+msgstr "Abriendo la configuración de red…"
+
+#, kde-format
+msgid "%1/%2 Mb/s  ·  %3 dBm (%4)"
+msgstr "%1/%2 Mb/s  ·  %3 dBm (%4)"
+
+msgid "scanning…"
+msgstr "buscando…"
+
+msgid "Scan again"
+msgstr "Buscar de nuevo"
+
+msgid "You are already on this network."
+msgstr "Ya estás en esta red."
+
+msgid "Dimmed padlock: network not saved yet — opens settings for the password."
+msgstr "Candado atenuado: red aún no guardada — abre la configuración para la contraseña."
+
+#, kde-format
+msgid "%1 network nearby"
+msgid_plural "%1 networks nearby"
+msgstr[0] "%1 red cercana"
+msgstr[1] "%1 redes cercanas"

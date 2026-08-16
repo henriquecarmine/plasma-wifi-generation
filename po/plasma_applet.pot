@@ -1,0 +1,122 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the Wi-Fi Generation package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Wi-Fi Generation 1.2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-15 21:00-0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#: package/contents/ui/main.qml:75
+msgid "excellent"
+msgstr ""
+
+#: package/contents/ui/main.qml:76
+msgid "good"
+msgstr ""
+
+#: package/contents/ui/main.qml:77
+msgid "fair"
+msgstr ""
+
+#: package/contents/ui/main.qml:78
+msgid "weak"
+msgstr ""
+
+#: package/contents/ui/main.qml:79
+msgid "very weak"
+msgstr ""
+
+#: package/contents/ui/main.qml:80
+msgid "unknown"
+msgstr ""
+
+#: package/contents/ui/main.qml:88
+msgid "2.4 GHz"
+msgstr ""
+
+#: package/contents/ui/main.qml:89
+msgid "5 GHz"
+msgstr ""
+
+#: package/contents/ui/main.qml:90
+msgid "6 GHz"
+msgstr ""
+
+#: package/contents/ui/main.qml:98 package/contents/ui/main.qml:191
+msgid "Unknown"
+msgstr ""
+
+#: package/contents/ui/main.qml:102
+msgid "open"
+msgstr ""
+
+#: package/contents/ui/main.qml:158
+msgid "No response from the system"
+msgstr ""
+
+#: package/contents/ui/main.qml:165
+msgid "Connected to %1"
+msgstr ""
+
+#: package/contents/ui/main.qml:167
+msgid "No network given"
+msgstr ""
+
+#: package/contents/ui/main.qml:171
+msgid "Failed: %1"
+msgstr ""
+
+#: package/contents/ui/main.qml:177
+msgid "No Wi-Fi adapter"
+msgstr ""
+
+#: package/contents/ui/main.qml:183
+msgid "Disconnected"
+msgstr ""
+
+#: package/contents/ui/main.qml:228
+msgid "Connecting to %1…"
+msgstr ""
+
+#: package/contents/ui/main.qml:237
+msgid "Opening network settings…"
+msgstr ""
+
+#: package/contents/ui/main.qml:268 package/contents/ui/main.qml:356
+msgid "%1/%2 Mb/s  ·  %3 dBm (%4)"
+msgstr ""
+
+#: package/contents/ui/main.qml:389
+msgid "%1 network nearby"
+msgid_plural "%1 networks nearby"
+msgstr[0] ""
+msgstr[1] ""
+
+#: package/contents/ui/main.qml:398
+msgid "scanning…"
+msgstr ""
+
+#: package/contents/ui/main.qml:407
+msgid "Scan again"
+msgstr ""
+
+#: package/contents/ui/main.qml:444
+msgid "You are already on this network."
+msgstr ""
+
+#: package/contents/ui/main.qml:494
+msgid ""
+"Dimmed padlock: network not saved yet — opens settings for the password."
+msgstr ""
