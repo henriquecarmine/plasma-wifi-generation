@@ -1,7 +1,7 @@
 %global plasmoid_id com.henrique.wifigeracao
 
 Name:           plasma-applet-wifi-generation
-Version:        1.6
+Version:        1.7
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -61,6 +61,27 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.7-1
+- The network list became a TABLE: name, access point, generation and signal
+  in fixed columns, under a header that names them. Ragged columns are read
+  one row at a time; aligned ones are read straight down, and the whole point
+  of a list is the comparison.
+- Signal is a four-step meter that takes colour only at the extremes — green
+  above -55 dBm, red below -80, theme colour in between. A continuous
+  green-to-red gradient paints most networks amber and turns the eye to
+  matching hues instead of counting steps.
+- One row per ACCESS POINT rather than per name, with a button that shows
+  every radio. It is the only way to see a repeater standing beside the main
+  unit — and a checkbox on the row ties the connection to one of them, for
+  the day the configuration page lives on the other side of the house.
+- The address panel now answers the whole question in one line: the address
+  this machine holds, the gateway it leaves through, and the address the
+  internet sees. It replaces a "dhcp" badge whose number was drawn grey on
+  grey — opacity on the chip dimmed the label with it.
+- Unknown security is no longer reported as "open". Our list remembers access
+  points NetworkManager has already dropped, and an open padlock over a
+  protected network is a lie told on the dangerous side.
+
 * Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.6-1
 - Addresses are now a LIST per interface, shown as chips: add, remove, and a
   suggest button that scans from .240 downwards — a range rarely inside a

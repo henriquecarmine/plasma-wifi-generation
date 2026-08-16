@@ -43,11 +43,25 @@ _wifi_profiles() {
 #
 # Emits "OK|<detail>" or "FAIL|<detail>". The detail comes from nmcli, which
 # is itself localised by the system, so it is passed through untouched.
+# --connect <ssid> [bssid]
+#
+# Com BSSID, o perfil é AMARRADO àquele rádio antes de subir. É o que resolve
+# o caso do repetidor: numa casa com dois rádios anunciando o mesmo nome, o
+# NetworkManager escolhe pelo sinal, e nem sempre é onde você quer entrar —
+# para configurar o principal, por exemplo. Sem BSSID, a amarra é DESFEITA,
+# senão o perfil ficaria preso a um rádio que pode nem existir amanhã.
 if [ "${1:-}" = "--connect" ]; then
 	target="${2:-}"
+	fixar="${3:-}"
 	[ -n "$target" ] || { echo "FAIL|noname"; exit 1; }
 	profile=$(_wifi_profiles | awk -F'\t' -v a="$target" '$1==a {print $2; exit}')
-	out=$(/usr/bin/nmcli con up id "${profile:-$target}" 2>&1); rc=$?
+	alvo_perfil="${profile:-$target}"
+	if [ -n "$fixar" ]; then
+		/usr/bin/nmcli connection modify "$alvo_perfil" 802-11-wireless.bssid "$fixar" >/dev/null 2>&1
+	else
+		/usr/bin/nmcli connection modify "$alvo_perfil" 802-11-wireless.bssid "" >/dev/null 2>&1
+	fi
+	out=$(/usr/bin/nmcli con up id "$alvo_perfil" 2>&1); rc=$?
 	# On-disk trail: without it, "I clicked and nothing happened" cannot be
 	# diagnosed from outside — no way to tell whether the click arrived, the
 	# command ran, or what nmcli answered.
@@ -67,96 +81,151 @@ if [ "${1:-}" = "--connect" ]; then
 	exit 0
 fi
 
-# --networks [--scan]: one network per line,
-#   "inuse|signal|security|saved|ssid"
+# --desfixar <ssid>: solta o perfil do rádio a que ele estava amarrado.
 #
-# SSID goes LAST on purpose: it is the only field that may contain a colon,
-# so `cut -f5-` recovers the whole remainder without getting lost.
-#
-# Without --scan this reads NetworkManager's cache, which is instant but goes
-# stale: measured 2026-08-16, a network at 80% signal was simply absent from
-# the cache and came back the moment a scan was requested. A network list
-# without a scan is an old photograph.
-# Geração de cada rede vista, do CACHE de varredura do kernel.
-#
-# `iw scan dump` lê o cache — não dispara varredura e, ao contrário de `iw
-# scan`, roda sem root (conferido). O `nmcli` não expõe geração nenhuma e o
-# wpa_supplicant nega acesso ao barramento para usuário comum; o `iw` é o
-# único caminho.
-#
-# Emite "ssid<TAB>numero", uma linha por rede, com a MAIOR geração vista para
-# aquele nome: com dois rádios anunciando o mesmo SSID, o que vale é o melhor
-# que a rede oferece.
-_geracoes() {
-	[ -n "${IF:-}" ] || return 0
-	cache="${XDG_CACHE_HOME:-$HOME/.cache}/wifi-geracao-redes.tsv"
+# Separado do --connect de propósito: desfixar NÃO reconecta. Quem tira a
+# amarra costuma estar de saída do lugar — reconectar ali seria desfazer o
+# que a pessoa acabou de pedir.
+if [ "${1:-}" = "--desfixar" ]; then
+	alvo="${2:-}"
+	[ -n "$alvo" ] || { echo "FAIL|noname"; exit 1; }
+	perfil=$(_wifi_profiles | awk -F'\t' -v a="$alvo" '$1==a {print $2; exit}')
+	[ -n "$perfil" ] || { echo "FAIL|noprofile"; exit 1; }
+	if /usr/bin/nmcli connection modify "$perfil" 802-11-wireless.bssid "" >/dev/null 2>&1; then
+		echo "OK|$alvo"
+	else
+		echo "FAIL|$alvo"
+	fi
+	exit 0
+fi
 
-	# O registro fecha no PRÓXIMO "BSS", não numa linha interna: no `iw`, o
-	# "last seen" vem ANTES do SSID e das capacidades, e fechar ali gravava
-	# sempre um registro vazio — a primeira versão não devolvia nada.
+# Pontos de acesso vistos, UM POR LINHA, do cache de varredura do kernel:
+#   "bssid<TAB>dbm<TAB>geracao<TAB>freq<TAB>ssid"
+#
+# Por PONTO DE ACESSO, não por nome de rede. É o que permite ver as
+# concorrentes — dois rádios anunciando o mesmo SSID, caso de qualquer casa
+# com repetidor — e amarrar a conexão a um deles.
+#
+# `iw scan dump` lê o cache e roda sem root; `iw scan` dispararia varredura e
+# exigiria privilégio. O NetworkManager não expõe geração nenhuma e o
+# wpa_supplicant nega o barramento a usuário comum.
+_pontos() {
+	[ -n "${IF:-}" ] || return 0
+	cache="${XDG_CACHE_HOME:-$HOME/.cache}/wifi-geracao-pontos.tsv"
+
+	# O registro fecha no PRÓXIMO "BSS": no `iw`, "last seen" e "signal" vêm
+	# ANTES do SSID e das capacidades, e fechar numa linha interna gravava
+	# registro vazio.
 	visto=$(iw dev "$IF" scan dump 2>/dev/null | awk '
-		function fecha() { if (ssid != "" && g > vis[ssid]) vis[ssid] = g }
-		/^BSS /            { fecha(); ssid=""; g=0 }
+		function fecha() {
+			if (bssid != "" && ssid != "")
+				printf "%s\t%s\t%d\t%s\t%s\n", bssid, dbm, g, freq, ssid
+		}
+		/^BSS /            { fecha(); bssid=substr($2,1,17); ssid=""; g=0; dbm=""; freq="" }
+		/^\tfreq: /        { freq=$2 }
+		/^\tsignal: /      { dbm=$2 }
 		/^\tSSID: /        { ssid=substr($0, 8) }
 		/EHT capabilities/ { if (g<7) g=7 }
 		/HE capabilities/  { if (g<6) g=6 }
 		/VHT capabilities/ { if (g<5) g=5 }
 		/HT capabilities/  { if (g<4) g=4 }
-		END { fecha(); for (s in vis) printf "%s\t%d\n", s, vis[s] }
+		END { fecha() }
 	')
 
 	# O cache do KERNEL guarda só a última varredura; o NetworkManager lembra
-	# de redes ouvidas minutos atrás e as lista assim mesmo. Sem memória
-	# própria, o número da geração piscava: aparecia numa varredura e sumia na
-	# seguinte, para a mesma rede — pior que não mostrar. Aqui o que já se
-	# aprendeu é guardado e fundido, mantendo sempre a MAIOR geração vista.
-	printf '%s\n%s\n' "$visto" "$(cat "$cache" 2>/dev/null)" \
-	| awk -F'\t' 'NF==2 && $1!="" { if ($2+0 > v[$1]+0) v[$1]=$2 }
-	               END { for (s in v) printf "%s\t%s\n", s, v[s] }' \
-	| tee "$cache" 2>/dev/null
+	# de redes ouvidas minutos atrás. Sem memória própria, a geração piscava
+	# para a mesma rede — pior que não mostrar. A chave é o BSSID.
+	#
+	# Ler ANTES e gravar DEPOIS, sem `tee` no meio do cano: com o `tee`, o
+	# arquivo era truncado enquanto a substituição ainda tentava lê-lo, e cada
+	# chamada perdia parte do que já sabia — a lista encolhia sozinha entre
+	# duas varreduras seguidas.
+	antigo=$(cat "$cache" 2>/dev/null)
+	fundido=$(printf '%s\n%s\n' "$visto" "$antigo" \
+	| awk -F'\t' 'NF>=5 && $1!="" {
+		if (!($1 in ordem)) ordem[$1]=++n
+		if (!($1 in dbm) || $2 != "") dbm[$1]=$2
+		if ($3+0 > g[$1]+0) g[$1]=$3
+		if (freq[$1]=="") freq[$1]=$4
+		if (ssid[$1]=="") ssid[$1]=$5
+	} END {
+		for (b in ordem) printf "%s\t%s\t%s\t%s\t%s\n", b, dbm[b], g[b], freq[b], ssid[b]
+	}')
+	printf '%s\n' "$fundido" > "$cache" 2>/dev/null
+	printf '%s\n' "$fundido"
 }
+
 
 
 # A interface precisa ser conhecida ANTES da varredura: a geração de cada
 # rede sai de `iw dev <if> scan dump`, e com IF vazio o campo saía em branco.
 IF=$(iw dev 2>/dev/null | awk '/[[:space:]]Interface /{print $2; exit}')
+# --networks [--scan] [--todos]: uma linha por rede, ou por PONTO DE ACESSO.
+#
+#   "emuso|pct|dbm|seguranca|salva|geracao|fixado|bssid|ssid"
+#
+# Sem --todos, sobra o ponto mais forte de cada nome — que é o que se quer
+# ver no dia a dia. Com --todos, todos aparecem: é assim que se enxerga o
+# repetidor ao lado do principal e se escolhe a qual entrar.
+#
+# O SSID continua por ÚLTIMO: é o único campo que pode conter "|" ou ":".
 if [ "${1:-}" = "--networks" ]; then
-	if [ "${2:-}" = "--scan" ]; then
+	if [ "${2:-}" = "--scan" ] || [ "${3:-}" = "--scan" ]; then
 		/usr/bin/nmcli dev wifi rescan >/dev/null 2>&1
 		sleep 4   # rescan returns at once; the results arrive later
 	fi
-	# Uma leitura só do cache, DEPOIS da varredura e antes do laço.
-	#
-	# A ordem custou um defeito: calculando antes do rescan, uma rede que só
-	# aparecia na varredura nova saía sem geração — foi visto com um
-	# repetidor a 100% de sinal listado sem número nenhum. E ler por rede,
-	# dentro do laço, seriam dezenas de execuções de `iw` para a mesma
-	# informação.
-	GERACOES=$(_geracoes)
-	# Matched by SSID, not by profile name — see _wifi_profiles.
+	todos=0
+	case "${2:-}${3:-}" in *--todos*) todos=1 ;; esac
+
+	# Uma leitura só, DEPOIS da varredura: calculada antes, uma rede que só
+	# aparecia no scan novo saía sem geração.
+	PONTOS=$(_pontos)
 	saved=$(_wifi_profiles | cut -f1)
-	/usr/bin/nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID dev wifi list --rescan no 2>/dev/null \
-	| while IFS= read -r line; do
-		use=$(printf '%s' "$line" | cut -d: -f1)
-		sig=$(printf '%s' "$line" | cut -d: -f2)
-		sec=$(printf '%s' "$line" | cut -d: -f3)
-		ssid=$(printf '%s' "$line" | cut -d: -f4- | sed 's/\\:/:/g')
-		# A nameless network is hidden: there is nothing to click.
+	# Segurança e "em uso" vêm do NetworkManager, por NOME de rede.
+	segs=$(/usr/bin/nmcli -t -f SSID,SECURITY,IN-USE dev wifi list --rescan no 2>/dev/null)
+	# BSSID em uso agora. O `nmcli -t` ESCAPA os dois-pontos do MAC como
+	# "\:", e o `iw` devolve em minúsculas — comparar sem normalizar os dois
+	# nunca casava, e nenhuma rede aparecia como conectada.
+	atual=$(/usr/bin/nmcli -t -f ACTIVE,BSSID dev wifi list --rescan no 2>/dev/null \
+	        | awk -F'^(sim|yes|não|no):' '/^(sim|yes):/ {print substr($0, index($0,":")+1); exit}' \
+	        | tr -d '\\' | tr 'A-Z' 'a-z')
+
+	# Perfis AMARRADOS a um rádio: "ssid<TAB>bssid". É o que a caixa "só
+	# neste ponto" reflete — sem ler isto, ela mostraria desmarcada mesmo com
+	# a amarra posta, e o dono desconfiaria da própria configuração.
+	fixados=$(_wifi_profiles | while IFS=$'\t' read -r s_ssid s_perf; do
+		b=$(/usr/bin/nmcli -g 802-11-wireless.bssid connection show "$s_perf" 2>/dev/null)
+		[ -n "$b" ] && printf '%s\t%s\n' "$s_ssid" "$(printf '%s' "$b" | tr 'A-Z' 'a-z')"
+	done)
+
+	printf '%s\n' "$PONTOS" | while IFS=$'\t' read -r bssid dbm ger freq ssid; do
 		[ -n "$ssid" ] || continue
-		[ "$use" = "*" ] && use=1 || use=0
-		# "open" is a TOKEN, translated in QML. Anything else is the raw
-		# protocol name (WPA2, WPA3…), which is not translatable anyway.
-		[ -n "$sec" ] && sec_out="$sec" || sec_out="open"
+		# dBm para porcento, a mesma régua que o NetworkManager usa:
+		# −100 é 0%, −50 é 100%, linear no meio.
+		d=${dbm%%.*}
+		pct=$(( (d + 100) * 2 ))
+		[ "$pct" -gt 100 ] && pct=100
+		[ "$pct" -lt 0 ] && pct=0
+		# Segurança desconhecida NÃO é rede aberta. Nossa lista tem memória
+		# própria e o NetworkManager não: um ponto que ele já esqueceu vinha
+		# com o campo vazio, e chamar isso de "aberta" desenhava cadeado
+		# aberto numa rede protegida — mentira na tela, do lado errado.
+		sec=$(printf '%s\n' "$segs" | awk -F: -v s="$ssid" '$1==s {print $2; exit}')
+		if [ -z "$sec" ]; then
+			printf '%s\n' "$segs" | awk -F: -v s="$ssid" '$1==s {found=1} END {exit !found}' \
+				&& sec="open" || sec="unknown"
+		fi
 		if printf '%s\n' "$saved" | grep -qxF "$ssid"; then sav=1; else sav=0; fi
-		# Geração da rede, do cache de varredura. Campo NOVO antes do
-		# ssid: o ssid é o único que pode conter "|" ou ":", então
-		# continua sendo o último, e quem lê recupera o resto com um
-		# corte simples.
-		ger=$(printf '%s\n' "$GERACOES" | awk -F'\t' -v s="$ssid" '$1==s {print $2; exit}')
-		printf '%s|%s|%s|%s|%s|%s\n' "$use" "${sig:-0}" "$sec_out" "$sav" "${ger:-}" "$ssid"
+		uso=0
+		[ -n "$atual" ] && [ "$(printf '%s' "$bssid" | tr 'A-Z' 'a-z')" = "$atual" ] && uso=1
+		fix=0
+		alvo=$(printf '%s\n' "$fixados" | awk -F'\t' -v s="$ssid" '$1==s {print $2; exit}')
+		[ -n "$alvo" ] && [ "$(printf '%s' "$bssid" | tr 'A-Z' 'a-z')" = "$alvo" ] && fix=1
+		printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+			"$uso" "$pct" "${d:-}" "$sec" "$sav" "${ger:-}" "$fix" "$bssid" "$ssid"
 	done \
 	| sort -t'|' -k2,2nr \
-	| awk -F'|' '!seen[$6]++'   # same network from several APs: keep the strongest
+	| if [ "$todos" = 1 ]; then cat; else awk -F'|' '!visto[$9]++'; fi
 	exit 0
 fi
 
@@ -270,6 +339,25 @@ if [ "${1:-}" = "--perfil" ]; then
 	        | awk -F: '$2=="pppoe" {print $1; exit}')
 	printf '%s|%s|%s|%s|%s|%s\n' \
 		"$perfil" "${metodo:-}" "${ip4:-}" "${gw:-}" "${dns:-}" "${pppoe:-}"
+	exit 0
+fi
+
+# --saida <dev>: o IP público visto pela INTERNET, saindo por essa interface.
+#
+# Consulta externa, por isso só roda sob demanda — quando o painel de
+# endereços é aberto. Amarrada à interface com `--interface`, para dizer a
+# verdade quando houver duas saídas: com cabo e wifi ligados em provedores
+# diferentes, o IP público é diferente em cada uma.
+#
+# Serviço mínimo, que devolve só o endereço em texto puro. Emite o IP ou
+# vazio — sem internet, vazio é a resposta honesta.
+if [ "${1:-}" = "--saida" ]; then
+	dev="${2:-}"; [ -n "$dev" ] || { echo ""; exit 0; }
+	ip=$(curl -s --max-time 4 --interface "$dev" https://api.ipify.org 2>/dev/null)
+	case "$ip" in
+	*[!0-9.]*|"") echo "" ;;
+	*)            echo "$ip" ;;
+	esac
 	exit 0
 fi
 

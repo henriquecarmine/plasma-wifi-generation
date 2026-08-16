@@ -56,17 +56,37 @@ the protocol.
   a dot in the bottom-left corner when two links carry different gateways —
   load balancing or redundancy. The same gateway on both is not a mix: it is
   one exit reached by two paths.
-- **The generation of every scanned network**, not only the connected one:
-  the number sits beside each name in the list. It comes from the kernel's
-  scan cache via `iw scan dump`, which runs without root — NetworkManager
-  exposes no generation and wpa_supplicant denies bus access to a plain user.
-  Generations are remembered between scans, because the kernel cache holds
-  only the last one while NetworkManager lists networks heard minutes ago.
+- **The network list is a table**: name, access point, generation and signal
+  in fixed columns under a header that names them. Aligned columns are read
+  straight down; ragged ones are read one row at a time, and comparing is the
+  whole point of a list.
+- **The generation of every scanned network**, not only the connected one,
+  written out as "Wi-Fi 6" rather than a bare number. It comes from the
+  kernel's scan cache via `iw scan dump`, which runs without root —
+  NetworkManager exposes no generation and wpa_supplicant denies bus access
+  to a plain user. Generations are remembered between scans, because the
+  kernel cache holds only the last one while NetworkManager lists networks
+  heard minutes ago.
+- **Signal as a four-step meter** that takes colour only at the extremes:
+  green above −55 dBm, red below −80, theme colour in between. A continuous
+  green-to-red gradient paints most networks amber and turns the eye to
+  comparing hues instead of counting steps. The measured dBm is in the
+  tooltip.
+- **One row per access point**, with a button that shows every radio instead
+  of only the strongest of each name. It is the only way to see a repeater
+  standing beside the main unit — and the checkbox on the row ties the
+  connection to one exact radio, for the day the configuration page lives on
+  the other side of the house.
 - **Addresses as a list per interface**, shown as chips you can add and
   remove, with a suggest button that offers a free address verified by ping.
   A static address can be hung on an interface **without leaving DHCP** —
   which is how you reach a factory-default router without dropping the
   network you are using.
+- **What DHCP handed out, in one reading**: the address this machine holds,
+  the gateway it leaves through, and the address the internet sees. The last
+  one is asked of an outside service, and only when the panel is opened — a
+  tray widget that phones a server every few seconds leaks presence and
+  carries no reader.
 
 ## Connecting
 
