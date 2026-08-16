@@ -41,11 +41,21 @@ the protocol.
 - **In the tooltip:** generation, network, speed and signal.
 - **On click:** band, channel, width, up/down rate, signal in dBm with a
   plain-language quality, and the list of networks sorted by signal.
-- **Address and traffic:** IP and gateway on the same line as the channel,
-  aligned to the right edge, plus live download and upload rates sampled
-  every two seconds while the popup is open.
+- **One row per interface**, wired included: the medium on the left (channel
+  and width for Wi-Fi, negotiated link speed for cable), live download and
+  upload in the middle, the address on the right. The gateway lives in the
+  row's tooltip — measured, it was the widest and most repeated datum on the
+  line, usually identical on both interfaces.
+- An interface appears if it has an address **or** a carrier, so a cable
+  plugged a second ago shows up as "1000 Mb/s · no address" while it asks for
+  DHCP, instead of being invisible.
 - **A switch for the radio**, which keeps working with the radio off — the
   subcommand behind it never touches the wireless interface.
+- **The tray symbol follows the links:** the fan with the generation number
+  for Wi-Fi, the theme's `network-wired-symbolic` for cable, and the fan with
+  a dot in the bottom-left corner when two links carry different gateways —
+  load balancing or redundancy. The same gateway on both is not a mix: it is
+  one exit reached by two paths.
 
 ## Connecting
 

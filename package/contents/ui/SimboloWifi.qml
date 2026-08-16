@@ -31,6 +31,19 @@ Item {
     property int barras: 0
     // "6", "6E", "5", "4" — vazio desenha só os arcos
     property string numero: ""
+    // "wifi" desenha o leque; "mix", o leque com um ponto no canto oposto ao
+    // número, dizendo que há um segundo enlace ativo.
+    //
+    // O caso "cabo" NÃO é desenhado aqui: quem mostra é o `network-wired-symbolic`
+    // do próprio tema, que o Plasma já usa para rede cabeada e tinge junto com
+    // a fileira. Cheguei a desenhar uma tomada RJ45 à mão neste Canvas e a
+    // joguei fora — mesma lição do widget de clima: conjunto pronto e
+    // profissional ganha do traço caseiro, e ainda acompanha troca de tema.
+    //
+    // O ponto vai à ESQUERDA de propósito: o canto inferior direito já é do
+    // número da geração, e empilhar as duas marcas ali é o borrão que este
+    // projeto rejeita desde o contador do WhatsApp.
+    property string modo: "wifi"
     property real tamanho: Kirigami.Units.iconSizes.smallMedium
 
     // Quadrado, sempre: é o que faz caber em um slot da bandeja.
@@ -88,8 +101,10 @@ Item {
 
             ctx.lineWidth = lw;
             ctx.lineCap = "round";
+            ctx.lineJoin = "round";
             ctx.strokeStyle = cor;
             ctx.fillStyle = cor;
+
 
             // Ponto na base. Existe sempre — o que varia é o alcance.
             ctx.globalAlpha = raiz.barras > 0 ? 1.0 : 0.35;
@@ -111,8 +126,21 @@ Item {
             ctx.globalAlpha = 1.0;
 
             // ---- o número, por cima, do meio para baixo -------------------
-            if (raiz.numero.length === 0)
+            if (raiz.numero.length === 0) {
+                if (raiz.modo === "mix") {
+                    const rp0 = Math.max(1.2, w * 0.085);
+                    ctx.globalCompositeOperation = "destination-out";
+                    ctx.beginPath();
+                    ctx.arc(m + rp0, h - m - rp0, rp0 * 2.0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalCompositeOperation = "source-over";
+                    ctx.fillStyle = cor;
+                    ctx.beginPath();
+                    ctx.arc(m + rp0, h - m - rp0, rp0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
                 return;
+            }
 
             // "6E" tem dois caracteres e precisa caber na mesma largura.
             const fator = raiz.numero.length > 1 ? 0.38 : 0.50;
@@ -153,6 +181,24 @@ Item {
             ctx.fillStyle = cor;
             ctx.fillText(raiz.numero, nx, ny);
             ctx.globalAlpha = 1.0;
+
+            // Segundo enlace ativo: um ponto no canto inferior ESQUERDO, com
+            // o mesmo vão aberto por trás. Dois gateways distintos ao mesmo
+            // tempo é balanceamento ou redundância, e o ícone precisa dizer
+            // isso sem virar dois desenhos espremidos num quadrado de 22 px.
+            if (raiz.modo === "mix") {
+                const rp = Math.max(1.2, w * 0.085);
+                const px2 = m + rp, py2 = h - m - rp;
+                ctx.globalCompositeOperation = "destination-out";
+                ctx.beginPath();
+                ctx.arc(px2, py2, rp * 2.0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalCompositeOperation = "source-over";
+                ctx.fillStyle = cor;
+                ctx.beginPath();
+                ctx.arc(px2, py2, rp, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
     }
 }

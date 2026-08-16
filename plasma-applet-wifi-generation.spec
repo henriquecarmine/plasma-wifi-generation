@@ -1,7 +1,7 @@
 %global plasmoid_id com.henrique.wifigeracao
 
 Name:           plasma-applet-wifi-generation
-Version:        1.4
+Version:        1.5
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -61,6 +61,37 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.5-1
+- The popup now lists EVERY physical interface, one row each: medium on the
+  left (channel and width for Wi-Fi, negotiated link speed for wired), live
+  rates in the middle, address on the right. Discovered by plugging a cable:
+  the previous version spoke only of the wireless interface, so with a cable
+  carrying the traffic it showed an address nobody was using.
+- An interface is listed if it has an address OR a carrier. Requiring an
+  address hid the freshly plugged cable during the minutes it spends asking
+  for DHCP — which is exactly when its owner opens the popup to check.
+- The gateway moved to the row's tooltip. Measured, the ip+gw pair alone took
+  more width than the other three blocks together, and the gateway is the
+  most repeated datum on screen: usually identical on both interfaces.
+- The address label is the row's ELASTIC element (fillWidth, minimumWidth 0,
+  elide from the left). With a rigid spacer there, nothing yielded when the
+  sum passed the window width and the row burst out to the right.
+- Tray symbol follows the links: the fan with the generation number for
+  Wi-Fi, the theme's own network-wired-symbolic for cable, and the fan with a
+  dot in the bottom-LEFT corner when two links carry DIFFERENT gateways —
+  load balancing or redundancy. Same gateway on both is not a mix: it is one
+  exit reached by two paths.
+- The wired symbol is NOT drawn by hand. An RJ45 socket was drawn in the
+  Canvas and thrown away: the theme already ships network-wired-symbolic,
+  which Plasma uses for wired networks, tints with the row and survives a
+  theme change. Same lesson the weather widget taught earlier the same day.
+- Network is read every 15 s even with the popup CLOSED, because the tray
+  symbol depends on it; otherwise the icon would only learn about the cable
+  when somebody opened the popup.
+- Fixed: two assignments to properties that no longer existed survived in
+  onExpandedChanged, and the exception aborted the rest of the handler —
+  which is where the address and counter reads are requested. The popup
+  opened looking exactly like the version before this feature.
 * Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.4-1
 - The popup now carries the address and the traffic: IP and gateway on the
   same line as the channel, aligned right, and live download/upload rates.

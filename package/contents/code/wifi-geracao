@@ -123,32 +123,68 @@ if [ "${1:-}" = "--radio" ]; then
 	exit 0
 fi
 
-# --rede: "iface|ip/cidr|gateway"
+# --rede: uma linha por interface física COM endereço:
+#   "tipo|dev|ip/cidr|gateway|link_mbps"
 #
-# Campos vazios quando não há endereço — quem decide o que mostrar é o QML,
-# que é onde as palavras podem ser traduzidas.
+# Duas linhas quando há cabo e wifi ao mesmo tempo, que é o caso de quem
+# pluga o cabo sem desligar o rádio. Cada interface tem o SEU endereço, o SEU
+# gateway e a SUA velocidade; mostrar só uma esconde metade da rede — e a
+# primeira versão mostrava só a sem fio, o que apareceu no dia em que um cabo
+# foi plugado na máquina.
+#
+# `link` é a velocidade negociada do meio em Mb/s (100, 1000, 2500…), lida do
+# kernel. Só faz sentido no cabo: no wifi ela já vai no cabeçalho, vinda do
+# `iw`, e muda a cada quadro.
+_ip4() { /usr/sbin/ip -4 addr show "$1" 2>/dev/null | awk '/inet /{print $2; exit}'; }
+_gw4() { /usr/sbin/ip -4 route show default dev "$1" 2>/dev/null | awk '{print $3; exit}'; }
+
+# Só interface FÍSICA: sem o teste de `device` entram docker0, veth, br- e
+# afins, que têm endereço e não são "a rede" de ninguém.
+_interfaces() {
+	for caminho in /sys/class/net/*; do
+		dev=$(basename "$caminho")
+		[ "$dev" = "lo" ] && continue
+		[ -e "$caminho/device" ] || continue
+		# Entra com endereço OU com PORTADORA. Exigir endereço escondia o
+		# cabo recém-plugado, que fica minutos em "obtendo configuração de
+		# IP" — e é exatamente nesse momento que o dono abre o balão para
+		# ver se o cabo pegou. `carrier` dá erro em interface derrubada,
+		# daí o `|| echo 0`.
+		if [ -n "$(_ip4 "$dev")" ] \
+		|| [ "$(cat "$caminho/carrier" 2>/dev/null || echo 0)" = "1" ]; then
+			printf '%s\n' "$dev"
+		fi
+	done
+}
+
 if [ "${1:-}" = "--rede" ]; then
-	[ -n "${IF:-}" ] || { echo "|||"; exit 0; }
-	ip4=$(/usr/sbin/ip -4 addr show "$IF" 2>/dev/null \
-	      | awk '/inet /{print $2; exit}')
-	gw=$(/usr/sbin/ip -4 route show default dev "$IF" 2>/dev/null \
-	     | awk '{print $3; exit}')
-	printf '%s|%s|%s\n' "$IF" "${ip4:-}" "${gw:-}"
+	_interfaces | while IFS= read -r dev; do
+		if [ -d "/sys/class/net/$dev/wireless" ]; then
+			printf 'wifi|%s|%s|%s|\n' "$dev" "$(_ip4 "$dev")" "$(_gw4 "$dev")"
+		else
+			vel=$(cat "/sys/class/net/$dev/speed" 2>/dev/null)
+			[ "${vel:-0}" -gt 0 ] 2>/dev/null || vel=""
+			printf 'cabo|%s|%s|%s|%s\n' \
+				"$dev" "$(_ip4 "$dev")" "$(_gw4 "$dev")" "$vel"
+		fi
+	done
 	exit 0
 fi
 
-# --taxa: "rx_bytes|tx_bytes" — CONTADORES CRUS, não velocidade.
+# --taxa: "dev|rx_bytes|tx_bytes", uma linha por interface.
 #
-# A taxa sai da diferença entre duas leituras, e quem tem relógio é o QML.
-# Fazer o script dormir um segundo para calcular aqui travaria o motor de
-# execução do Plasma a cada atualização.
+# CONTADORES CRUS, não velocidade: a taxa sai da diferença entre duas
+# leituras, e quem tem relógio é o QML. Fazer o script dormir um segundo para
+# calcular aqui travaria o motor de execução do Plasma a cada atualização.
 if [ "${1:-}" = "--taxa" ]; then
-	[ -n "${IF:-}" ] || { echo "|"; exit 0; }
-	printf '%s|%s\n' \
-		"$(cat "/sys/class/net/$IF/statistics/rx_bytes" 2>/dev/null || echo 0)" \
-		"$(cat "/sys/class/net/$IF/statistics/tx_bytes" 2>/dev/null || echo 0)"
+	_interfaces | while IFS= read -r dev; do
+		printf '%s|%s|%s\n' "$dev" \
+			"$(cat "/sys/class/net/$dev/statistics/rx_bytes" 2>/dev/null || echo 0)" \
+			"$(cat "/sys/class/net/$dev/statistics/tx_bytes" 2>/dev/null || echo 0)"
+	done
 	exit 0
 fi
+
 case "$LINK" in
 	*"Not connected"*|"") echo "disconnected"; exit 0 ;;
 esac

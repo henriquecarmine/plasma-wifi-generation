@@ -116,41 +116,102 @@ PlasmoidItem {
     }
 
     // ---- rede e tráfego ------------------------------------------------
-    property string iface: ""
-    property string ip: ""
-    property string gateway: ""
-    property bool radioLigado: true
-    // Bytes por segundo, calculados aqui: o script entrega contador cru.
-    property real taxaDown: 0
-    property real taxaUp: 0
-    property real ultimoRx: -1
-    property real ultimoTx: -1
-    property double ultimoMs: 0
+    //
+    // UMA LINHA POR INTERFACE. Cada uma tem o seu endereço, o seu gateway e o
+    // seu tráfego; a primeira versão mostrava só a sem fio e escondia metade
+    // da rede no dia em que um cabo foi plugado.
+    ListModel { id: interfaces }   // tipo, dev, ip, gw, link, down, up
 
-    function medirTaxa(linha) {
-        const c = linha.split("|");
-        const rx = parseFloat(c[0]), tx = parseFloat(c[1]);
-        if (isNaN(rx) || isNaN(tx)) return;
-        const agora = Date.now();
-        if (root.ultimoRx >= 0 && agora > root.ultimoMs) {
-            const dt = (agora - root.ultimoMs) / 1000;
-            // Diferença negativa não é tráfego: é o contador reiniciando
-            // quando a interface cai e volta. Zerar é mais honesto que
-            // mostrar um pico de gigabytes.
-            const dr = rx - root.ultimoRx, dtx = tx - root.ultimoTx;
-            root.taxaDown = dr >= 0 ? dr / dt : 0;
-            root.taxaUp   = dtx >= 0 ? dtx / dt : 0;
+    // dev -> {rx, tx, ms} da leitura anterior. A taxa é a diferença dividida
+    // pelo tempo, e quem tem relógio aqui é o QML.
+    property var contadores: ({})
+
+    function montarInterfaces(saida) {
+        const vistos = {};
+        const linhas = saida.split("\n").filter(function (l) { return l.length > 0; });
+        for (let i = 0; i < linhas.length; i++) {
+            const c = linhas[i].split("|");
+            const dev = c[1] || "";
+            if (dev.length === 0) continue;
+            vistos[dev] = true;
+            let achou = -1;
+            for (let j = 0; j < interfaces.count; j++)
+                if (interfaces.get(j).dev === dev) { achou = j; break; }
+            const dados = {
+                "tipo": c[0] || "cabo", "dev": dev,
+                "ip": c[2] || "", "gw": c[3] || "", "link": c[4] || ""
+            };
+            // Atualizar em vez de recriar: recriando, as taxas piscavam a
+            // cada leitura de endereço, porque a linha nascia zerada.
+            if (achou >= 0) {
+                interfaces.setProperty(achou, "tipo", dados.tipo);
+                interfaces.setProperty(achou, "ip",   dados.ip);
+                interfaces.setProperty(achou, "gw",   dados.gw);
+                interfaces.setProperty(achou, "link", dados.link);
+            } else {
+                dados.down = 0; dados.up = 0;
+                interfaces.append(dados);
+            }
         }
-        root.ultimoRx = rx; root.ultimoTx = tx; root.ultimoMs = agora;
+        for (let k = interfaces.count - 1; k >= 0; k--)
+            if (!vistos[interfaces.get(k).dev]) interfaces.remove(k);
     }
 
-    // Unidades não passam por catálogo: "kB/s" e "MB/s" são as mesmas em
-    // toda parte, e o gettext rebaixaria a tradução por causa da barra.
+    function medirTaxa(saida) {
+        const agora = Date.now();
+        const linhas = saida.split("\n").filter(function (l) { return l.length > 0; });
+        for (let i = 0; i < linhas.length; i++) {
+            const c = linhas[i].split("|");
+            const dev = c[0];
+            const rx = parseFloat(c[1]), tx = parseFloat(c[2]);
+            if (!dev || isNaN(rx) || isNaN(tx)) continue;
+            const ant = root.contadores[dev];
+            if (ant && agora > ant.ms) {
+                const dt = (agora - ant.ms) / 1000;
+                // Diferença negativa não é tráfego: é o contador reiniciando
+                // quando a interface cai e volta. Zerar é mais honesto que
+                // mostrar um pico de gigabytes.
+                const dr = rx - ant.rx, dtx = tx - ant.tx;
+                for (let j = 0; j < interfaces.count; j++) {
+                    if (interfaces.get(j).dev !== dev) continue;
+                    interfaces.setProperty(j, "down", dr  >= 0 ? dr  / dt : 0);
+                    interfaces.setProperty(j, "up",   dtx >= 0 ? dtx / dt : 0);
+                }
+            }
+            root.contadores[dev] = { "rx": rx, "tx": tx, "ms": agora };
+        }
+    }
+
+    // Unidades não passam por catálogo: "kB/s" e "MB/s" são as mesmas em toda
+    // parte, e o gettext rebaixaria a tradução por causa da barra.
     function textoTaxa(bps) {
-        if (!root.conectado) return "—";
         if (bps < 1024) return Math.round(bps) + " B/s";
         if (bps < 1048576) return (bps / 1024).toFixed(bps < 10240 ? 1 : 0) + " kB/s";
         return (bps / 1048576).toFixed(1) + " MB/s";
+    }
+
+    property bool radioLigado: true
+
+    // Qual símbolo a bandeja mostra. Regra do dono: dois enlaces com saída
+    // para rede e GATEWAYS DIFERENTES ao mesmo tempo — balanceamento ou
+    // redundância — pedem o símbolo misto; se só um estiver conectado,
+    // aparece o dele.
+    //
+    // Gateways IGUAIS não são mix: é a mesma saída alcançada por dois
+    // caminhos, e mostrar duas marcas aí seria dizer o que não há.
+    readonly property string modoSimbolo: {
+        let comGw = [];
+        for (let i = 0; i < interfaces.count; i++) {
+            const it = interfaces.get(i);
+            if (it.gw && it.gw.length > 0) comGw.push(it);
+        }
+        if (comGw.length >= 2) {
+            const distintos = {};
+            for (let j = 0; j < comGw.length; j++) distintos[comGw[j].gw] = true;
+            if (Object.keys(distintos).length >= 2) return "mix";
+        }
+        if (comGw.length === 1) return comGw[0].tipo === "cabo" ? "cabo" : "wifi";
+        return "wifi";
     }
 
     ListModel { id: redes }
@@ -174,10 +235,7 @@ PlasmoidItem {
                 root.lerEstado();
                 root.lerRede();
             } else if (source.indexOf("--rede") >= 0) {
-                const c = saida.split("|");
-                root.iface   = c[0] || "";
-                root.ip      = c[1] || "";
-                root.gateway = c[2] || "";
+                root.montarInterfaces(saida);
             } else if (source.indexOf("--taxa") >= 0) {
                 root.medirTaxa(saida);
             } else if (source.indexOf("--connect") >= 0) {
@@ -311,6 +369,17 @@ PlasmoidItem {
     // about in the journal on every load.
     // Amostra só com o balão ABERTO. Duas leituras por segundo de /sys num
     // widget que passa o dia fechado é gasto sem leitor.
+    // A leitura de rede também roda com o balão FECHADO, mas devagar: é dela
+    // que sai o símbolo da bandeja, e um ícone que só descobre o cabo quando
+    // alguém abre o balão está sempre atrasado.
+    Timer {
+        interval: 15000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.lerRede()
+    }
+
     Timer {
         interval: 2000
         running: root.expanded
@@ -321,10 +390,9 @@ PlasmoidItem {
 
     onExpandedChanged: {
         if (root.expanded) {
-            // Zera a base: com a medida anterior de minutos atrás, a
+            // Zera as bases: com a leitura anterior de minutos atrás, a
             // primeira taxa sairia como média do intervalo inteiro.
-            root.ultimoRx = -1;
-            root.ultimoTx = -1;
+            root.contadores = ({});
             root.lerRede();
             root.lerRadio();
             root.avisoAcao = "";
@@ -359,10 +427,23 @@ PlasmoidItem {
     compactRepresentation: Item {
         id: compacto
 
+        // Cabo: ícone do TEMA, não desenho nosso. É o mesmo símbolo que o
+        // Plasma usa para rede cabeada, já tingido pelo painel.
+        Kirigami.Icon {
+            anchors.centerIn: parent
+            visible: root.modoSimbolo === "cabo"
+            source: "network-wired-symbolic"
+            width:  Kirigami.Units.iconSizes.roundedIconSize(
+                        Math.min(compacto.width, compacto.height))
+            height: width
+        }
+
         SimboloWifi {
             anchors.centerIn: parent
+            visible: root.modoSimbolo !== "cabo"
             barras: root.barras
             numero: root.numeroGeracao
+            modo: root.modoSimbolo
             // A tray icon does not take any size: it snaps to the standard
             // ladder (16, 22, 32…). Filling the whole square left the symbol
             // one step larger than its neighbours.
@@ -386,11 +467,11 @@ PlasmoidItem {
         // implicitWidth/Height, not just the Layout hints. An Item with no
         // implicit size opens the popup at zero by zero: the click works,
         // the state turns expanded, and nothing shows on screen.
-        implicitWidth:  Kirigami.Units.gridUnit * 27
+        implicitWidth:  Kirigami.Units.gridUnit * 32
         implicitHeight: coluna.implicitHeight + Kirigami.Units.largeSpacing * 2
 
         Layout.minimumWidth:    Kirigami.Units.gridUnit * 22
-        Layout.preferredWidth:  Kirigami.Units.gridUnit * 27
+        Layout.preferredWidth:  Kirigami.Units.gridUnit * 32
         Layout.minimumHeight:   implicitHeight
         Layout.preferredHeight: implicitHeight
 
@@ -405,9 +486,18 @@ PlasmoidItem {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
 
+                Kirigami.Icon {
+                    visible: root.modoSimbolo === "cabo"
+                    source: "network-wired-symbolic"
+                    Layout.preferredWidth:  Kirigami.Units.iconSizes.large
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.large
+                }
+
                 SimboloWifi {
+                    visible: root.modoSimbolo !== "cabo"
                     barras: root.barras
                     numero: root.numeroGeracao
+                    modo: root.modoSimbolo
                     tamanho: Kirigami.Units.iconSizes.large
                     Layout.preferredWidth:  implicitWidth
                     Layout.preferredHeight: implicitHeight
@@ -482,56 +572,99 @@ PlasmoidItem {
                         }
                     }
 
-                    Item { Layout.preferredHeight: Kirigami.Units.smallSpacing }
-
-                    PlasmaComponents.Label {
-                        Layout.alignment: Qt.AlignRight
-                        text: "↓  " + root.textoTaxa(root.taxaDown)
-                        font: Kirigami.Theme.smallFont
-                    }
-
-                    PlasmaComponents.Label {
-                        Layout.alignment: Qt.AlignRight
-                        text: "↑  " + root.textoTaxa(root.taxaUp)
-                        font: Kirigami.Theme.smallFont
-                    }
-
                 }
             }
 
-            // Canal e endereços na MESMA linha, ocupando a largura INTEIRA da
-            // janela — e não dentro da coluna de textos, como ficou na
-            // primeira tentativa: ali dentro esta linha empurrava a coluna do
-            // interruptor e das taxas para fora do quadro.
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
+            // Uma linha por interface, no mesmo desenho: à esquerda o que
+            // descreve o MEIO (canal e largura no wifi, velocidade negociada
+            // no cabo), no meio o tráfego vivo, e o endereço encostado à
+            // direita. São linhas irmãs porque são o mesmo tipo de fato.
+            //
+            // Esta linha ocupa a largura INTEIRA da janela. Dentro da coluna
+            // de textos, como ficou na primeira tentativa, ela empurrava o
+            // interruptor para fora do quadro.
+            Repeater {
+                model: interfaces
 
-                PlasmaComponents.Label {
-                    visible: root.conectado && root.canal.length > 0
-                    text: i18nd(root.dom, "Channel %1  ·  %2",
-                                root.canal, root.largura)
-                    opacity: 0.7
-                    font: Kirigami.Theme.smallFont
-                    elide: Text.ElideRight
-                    Layout.minimumWidth: 0
-                }
+                delegate: RowLayout {
+                    Layout.fillWidth: true
+                    // Teto explícito: sem ele o balão cresce para caber a
+                    // linha, em vez de a linha caber no balão.
+                    Layout.maximumWidth: coluna.width
+                    spacing: Kirigami.Units.smallSpacing
 
-                Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                    Kirigami.Icon {
+                        source: model.tipo === "cabo"
+                            ? "network-wired-symbolic"
+                            : "network-wireless-symbolic"
+                        opacity: 0.7
+                        Layout.preferredWidth:  Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                    }
 
-                PlasmaComponents.Label {
-                    visible: root.ip.length > 0
-                    text: root.gateway.length > 0
-                        ? i18nd(root.dom, "ip %1   gw %2", root.ip, root.gateway)
-                        : i18nd(root.dom, "ip %1", root.ip)
-                    horizontalAlignment: Text.AlignRight
-                    opacity: 0.65
-                    font: Kirigami.Theme.smallFont
-                    // Corte pela ESQUERDA: num endereço, o fim é o que
-                    // identifica — perder "192.168." dói menos que perder
-                    // ".96/24".
-                    elide: Text.ElideLeft
-                    Layout.minimumWidth: 0
+                    PlasmaComponents.Label {
+                        text: model.tipo === "cabo"
+                            ? (model.link.length > 0
+                                ? i18nd(root.dom, "%1 Mb/s", model.link)
+                                : model.dev)
+                            : (root.canal.length > 0
+                                ? i18nd(root.dom, "Channel %1  ·  %2",
+                                        root.canal, root.largura)
+                                : model.dev)
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        elide: Text.ElideRight
+                        Layout.minimumWidth: 0
+                    }
+
+                    PlasmaComponents.Label {
+                        text: "↓ " + root.textoTaxa(model.down)
+                            + "   ↑ " + root.textoTaxa(model.up)
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.85
+                        Layout.minimumWidth: 0
+                    }
+
+                    // O endereço é o ELÁSTICO da linha: `fillWidth` com
+                    // `minimumWidth: 0`. Com um espaçador rígido no lugar
+                    // dele, quando a soma passava da janela ninguém cedia e a
+                    // linha estourava pela direita — o espaçador some, mas os
+                    // rótulos guardam a largura implícita do texto.
+                    //
+                    // O GATEWAY SAIU DAQUI, para o balão de dica. Medida a
+                    // linha, o par ip+gw sozinho ocupava mais que os outros
+                    // três blocos somados — e o gateway é o dado mais
+                    // repetido da tela: costuma ser o mesmo nas duas
+                    // interfaces e quase nunca é consultado.
+                    PlasmaComponents.Label {
+                        // Sem endereço a linha continua aparecendo, dizendo
+                        // isso: um cabo plugado que ainda não pegou IP é
+                        // informação, e escondê-lo é responder à pergunta
+                        // errada.
+                        text: model.ip.length === 0
+                            ? i18nd(root.dom, "no address")
+                            : i18nd(root.dom, "ip %1", model.ip)
+                        horizontalAlignment: Text.AlignRight
+                        opacity: 0.65
+                        font: Kirigami.Theme.smallFont
+                        // Corte pela ESQUERDA: num endereço o fim é o que
+                        // identifica — perder "192.168." dói menos que
+                        // perder ".96/24".
+                        elide: Text.ElideLeft
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+
+                        PlasmaComponents.ToolTip.visible: areaDica.containsMouse
+                        PlasmaComponents.ToolTip.text: model.gw.length > 0
+                            ? i18nd(root.dom, "%1 · gateway %2", model.dev, model.gw)
+                            : model.dev
+                        MouseArea {
+                            id: areaDica
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton
+                        }
+                    }
                 }
             }
 
