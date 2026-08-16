@@ -723,7 +723,13 @@ PlasmoidItem {
         // IGUAL ao preferido, e deixar o nome com `fillWidth` e mínimo zero.
         // Assim a variação toda cai num lugar só — o nome, que tem reticências
         // para isso — e as outras colunas começam no mesmo x em toda linha.
-        readonly property int colSimbolo: Kirigami.Units.iconSizes.medium
+        // O leque da lista fica no degrau do meio da escada de ícones. O
+        // médio pesava mais que o nome da rede, que é o dado principal; o
+        // pequeno levou junto o dígito da geração, que a 16 px deixa de se
+        // ler — e um número ilegível é pior que nenhum, porque ocupa espaço
+        // fingindo informar. 18 é o degrau entre os dois, e é da escada do
+        // tema, não número inventado.
+        readonly property int colSimbolo: Kirigami.Units.iconSizes.smallMedium
         readonly property int colPct:     Math.round(Kirigami.Units.gridUnit * 2.6)
         readonly property int colMac:     Math.round(Kirigami.Units.gridUnit * 7.0)
 

@@ -225,7 +225,22 @@ if [ "${1:-}" = "--networks" ]; then
 			"$uso" "$pct" "${d:-}" "$sec" "$sav" "${ger:-}" "$fix" "$bssid" "$ssid"
 	done \
 	| sort -t'|' -k2,2nr \
-	| if [ "$todos" = 1 ]; then cat; else awk -F'|' '!visto[$9]++'; fi
+	| if [ "$todos" = 1 ]; then
+		# Mostrando cada aparelho, a ordem é ALFABÉTICA — e, dentro do mesmo
+		# nome, do mais forte para o mais fraco. Por potência pura, o
+		# repetidor e o principal ficam separados por vizinhos no meio da
+		# lista, e a comparação que a pessoa foi fazer ali exige os dois
+		# lado a lado.
+		#
+		# A primeira chave vai do campo 9 ao FIM da linha: o SSID é o último
+		# campo justamente porque pode conter "|", e recortá-lo em nove
+		# quebraria o nome de quem usa esse caractere.
+		sort -t'|' -k9f -k2,2nr
+	else
+		# Uma linha por nome: sobra a mais forte, que é a que se quer ver no
+		# dia a dia. A lista já vem ordenada por potência.
+		awk -F'|' '!visto[$9]++'
+	fi
 	exit 0
 fi
 

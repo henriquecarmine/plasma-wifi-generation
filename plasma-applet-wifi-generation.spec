@@ -89,6 +89,11 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
   the main unit — and a checkbox on the row ties the connection to one of
   them, for the day the configuration page lives on the other side of the
   house.
+- Two orders, one per mode: by signal in the normal list, where the strongest
+  is what you want; alphabetical when every device is shown, so a repeater
+  stands next to the unit it repeats. By signal alone the two end up separated
+  by neighbours, and comparing them is why that mode exists. Within one name,
+  the strongest still comes first.
 - The address, gateway and public IP are in the interface row's tooltip, and
   clicking the row copies the three. Reading an address off a screen to type
   it somewhere else is how a digit gets lost.

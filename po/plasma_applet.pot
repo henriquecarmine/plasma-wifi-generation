@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Wi-Fi Generation 1.7\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-16 19:42-0300\n"
+"POT-Creation-Date: 2026-08-16 20:03-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -134,154 +134,154 @@ msgstr ""
 msgid "Opening network settings…"
 msgstr ""
 
-#: package/contents/ui/main.qml:655 package/contents/ui/main.qml:796
+#: package/contents/ui/main.qml:655 package/contents/ui/main.qml:802
 msgid "%1/%2 Mb/s  ·  %3 dBm (%4)"
 msgstr ""
 
-#: package/contents/ui/main.qml:826
+#: package/contents/ui/main.qml:832
 msgid "Wi-Fi"
 msgstr ""
 
-#: package/contents/ui/main.qml:881
+#: package/contents/ui/main.qml:887
 msgid "%1 Mb/s"
 msgstr ""
 
-#: package/contents/ui/main.qml:884
+#: package/contents/ui/main.qml:890
 msgid "Channel %1  ·  %2"
 msgstr ""
 
-#: package/contents/ui/main.qml:918
+#: package/contents/ui/main.qml:924
 msgid "no address"
 msgstr ""
 
-#: package/contents/ui/main.qml:919
+#: package/contents/ui/main.qml:925
 msgid "ip %1"
 msgstr ""
 
-#: package/contents/ui/main.qml:956
+#: package/contents/ui/main.qml:962
 msgid "Address settings"
 msgstr ""
 
-#: package/contents/ui/main.qml:970
+#: package/contents/ui/main.qml:976
 msgid "Address of %1 (%2)"
 msgstr ""
 
-#: package/contents/ui/main.qml:980
+#: package/contents/ui/main.qml:986
 msgid "DHCP"
 msgstr ""
 
-#: package/contents/ui/main.qml:985
+#: package/contents/ui/main.qml:991
 msgid "Manual"
 msgstr ""
 
-#: package/contents/ui/main.qml:994
+#: package/contents/ui/main.qml:1000
 msgid "PPPoE"
 msgstr ""
 
-#: package/contents/ui/main.qml:1018
+#: package/contents/ui/main.qml:1024
 msgid "Received automatically (DHCP)"
 msgstr ""
 
-#: package/contents/ui/main.qml:1046
+#: package/contents/ui/main.qml:1052
 msgid "This machine"
 msgstr ""
 
-#: package/contents/ui/main.qml:1048
+#: package/contents/ui/main.qml:1054
 msgid "Gateway (router)"
 msgstr ""
 
-#: package/contents/ui/main.qml:1050
+#: package/contents/ui/main.qml:1056
 msgid "Out on the internet"
 msgstr ""
 
-#: package/contents/ui/main.qml:1083
+#: package/contents/ui/main.qml:1089
 msgid "none"
 msgstr ""
 
-#: package/contents/ui/main.qml:1104
+#: package/contents/ui/main.qml:1110
 msgid "Fixed addresses"
 msgstr ""
 
-#: package/contents/ui/main.qml:1140
+#: package/contents/ui/main.qml:1146
 msgid "Remove this address"
 msgstr ""
 
-#: package/contents/ui/main.qml:1156
+#: package/contents/ui/main.qml:1162
 msgid "another address, e.g. 192.168.1.240/24"
 msgstr ""
 
-#: package/contents/ui/main.qml:1167
+#: package/contents/ui/main.qml:1173
 msgid "Suggest a free address"
 msgstr ""
 
-#: package/contents/ui/main.qml:1174
+#: package/contents/ui/main.qml:1180
 msgid "Add address"
 msgstr ""
 
-#: package/contents/ui/main.qml:1186
+#: package/contents/ui/main.qml:1192
 msgid "Gateway"
 msgstr ""
 
-#: package/contents/ui/main.qml:1196
+#: package/contents/ui/main.qml:1202
 msgid "DNS"
 msgstr ""
 
-#: package/contents/ui/main.qml:1211
+#: package/contents/ui/main.qml:1217
 msgid "Cancel"
 msgstr ""
 
-#: package/contents/ui/main.qml:1216
+#: package/contents/ui/main.qml:1222
 msgid "Apply"
 msgstr ""
 
-#: package/contents/ui/main.qml:1251
+#: package/contents/ui/main.qml:1257
 msgid "%1 access point nearby"
 msgid_plural "%1 access points nearby"
 msgstr[0] ""
 msgstr[1] ""
 
-#: package/contents/ui/main.qml:1253
+#: package/contents/ui/main.qml:1259
 msgid "%1 network nearby"
 msgid_plural "%1 networks nearby"
 msgstr[0] ""
 msgstr[1] ""
 
-#: package/contents/ui/main.qml:1266
+#: package/contents/ui/main.qml:1272
 msgid "scanning…"
 msgstr ""
 
-#: package/contents/ui/main.qml:1278 package/contents/ui/main.qml:1285
+#: package/contents/ui/main.qml:1284 package/contents/ui/main.qml:1291
 msgid "Show routers and repeaters"
 msgstr ""
 
-#: package/contents/ui/main.qml:1292 package/contents/ui/main.qml:1295
+#: package/contents/ui/main.qml:1298 package/contents/ui/main.qml:1301
 msgid "Scan again"
 msgstr ""
 
-#: package/contents/ui/main.qml:1337
+#: package/contents/ui/main.qml:1343
 msgid "You are already on this network."
 msgstr ""
 
-#: package/contents/ui/main.qml:1396
+#: package/contents/ui/main.qml:1402
 msgid "Wi-Fi %1"
 msgstr ""
 
-#: package/contents/ui/main.qml:1440
+#: package/contents/ui/main.qml:1446
 msgid "Connect only to this router"
 msgstr ""
 
-#: package/contents/ui/main.qml:1441
+#: package/contents/ui/main.qml:1447
 msgid "Save the network first"
 msgstr ""
 
-#: package/contents/ui/main.qml:1472
+#: package/contents/ui/main.qml:1478
 msgid "Number in the fan: Wi-Fi generation."
 msgstr ""
 
-#: package/contents/ui/main.qml:1473
+#: package/contents/ui/main.qml:1479
 msgid "Dimmed padlock: network not saved."
 msgstr ""
 
-#: package/contents/ui/main.qml:1474
+#: package/contents/ui/main.qml:1480
 msgid "Checkbox: stay on this router."
 msgstr ""
