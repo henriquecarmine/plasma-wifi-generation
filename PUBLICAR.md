@@ -27,12 +27,30 @@ textos e as capturas ficam prontos aqui e o clique final é seu:
 ## Capturas
 
 - `screenshots/01-tray.png` — o ícone na bandeja, entre os vizinhos.
-- `screenshots/02-popup.png` — a janela aberta, com a lista de redes.
+- `screenshots/02-popup.png` — a janela aberta, uma linha por rede.
+- `screenshots/03-repeaters.png` — o modo que mostra roteadores e
+  repetidores: quatro rádios anunciando `wifi_zone`, em ordem alfabética e do
+  mais forte para o mais fraco, cada um com o seu endereço.
 
-A segunda foi refeita nesta versão. A anterior mostrava, sem querer, o **IP
-público da máquina** numa dica aberta — atirar isso numa loja pública é
-diferente de mostrá-lo na própria tela. Vale conferir isso em toda captura
-nova: dica aberta, endereço de saída e nome de rede vizinha.
+**Em inglês, de propósito.** A loja é internacional e o anúncio é escrito em
+inglês; captura em português obrigaria o leitor a traduzir a tela para
+entender o que está vendo. Basta abrir com o idioma trocado:
+
+```bash
+LANGUAGE=en_US LANG=en_US.UTF-8 plasmawindowed com.henrique.wifigeracao
+spectacle -a -b -n -o janela.png       # -a captura só a janela ativa
+```
+
+A terceira precisa do modo ligado, que só existe depois de um clique. Para
+tirá-la sem depender disso, copie `package/`, troque `mostrarTodos` para
+`true` e o `Id` do `metadata.json` para um nome próprio, instale com
+`kpackagetool6 --type Plasma/Applet --install`, fotografe e **desinstale**.
+Nada disso encosta no pacote de verdade.
+
+**Confira o que aparece na foto.** Uma captura anterior mostrava, sem querer,
+o **IP público da máquina** numa dica aberta — mostrá-lo na própria tela é uma
+coisa, publicá-lo numa loja indexada é outra, e não se desfaz. Antes de subir:
+dica aberta, endereço de saída, nome de rede vizinha.
 
 ---
 
