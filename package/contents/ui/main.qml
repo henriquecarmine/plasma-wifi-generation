@@ -372,6 +372,20 @@ PlasmoidItem {
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
+
+                    // Channel and width belong with the other facts about the
+                    // current link. The i18n rewrite dropped the detail grid
+                    // that used to carry them and they ended up shown
+                    // nowhere — a regression introduced by that conversion.
+                    PlasmaComponents.Label {
+                        visible: root.conectado && root.canal.length > 0
+                        text: i18nd(root.dom, "Channel %1  ·  %2",
+                                    root.canal, root.largura)
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
                 }
             }
 

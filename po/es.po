@@ -91,3 +91,7 @@ msgid "%1 network nearby"
 msgid_plural "%1 networks nearby"
 msgstr[0] "%1 red cercana"
 msgstr[1] "%1 redes cercanas"
+
+#, kde-format
+msgid "Channel %1  ·  %2"
+msgstr "Canal %1  ·  %2"
