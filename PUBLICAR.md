@@ -57,8 +57,13 @@ Conferido a 48 px, que é onde uma marca morre se estiver cheia demais.
 - `screenshots/01-tray.png` — o ícone na bandeja, entre os vizinhos.
 - `screenshots/02-popup.png` — a janela aberta, uma linha por rede.
 - `screenshots/03-repeaters.png` — o modo que mostra roteadores e
-  repetidores: quatro rádios anunciando `wifi_zone`, em ordem alfabética e do
-  mais forte para o mais fraco, cada um com o seu endereço.
+  repetidores: vários rádios anunciando o mesmo nome, em ordem alfabética e
+  do mais forte para o mais fraco, cada um com o seu endereço, a estrela do
+  preferido e o alfinete da amarra.
+
+A captura do balão precisa mostrar a **caixa de qualidade medida** — nota,
+saltos de NAT, ida e volta. É o que separa este widget de um medidor de
+sinal, e uma captura sem ela vende a versão antiga.
 
 **Em inglês, de propósito.** A loja é internacional e o anúncio é escrito em
 inglês; captura em português obrigaria o leitor a traduzir a tela para
@@ -129,9 +134,9 @@ WHAT IT SHOWS
 
 - Tray: the Wi-Fi fan with the generation number overlaid. Arcs light up with
   signal strength; a weak link still LOOKS connected, with translucent arcs
-  instead of blank ones. With a cable and Wi-Fi carrying DIFFERENT gateways
-  at once, a dot in the corner says so — the same gateway on both is one exit
-  reached by two paths, and is not drawn as two.
+  instead of blank ones. When the CABLE carries the default route, the icon
+  becomes the cable icon — having a gateway is not leaving through it, and
+  with both links up only one moves packets.
 - Tooltip: generation, network, speed and signal.
 - On click: band, channel, width, up/down rate, and signal in dBm with a
   plain-language quality.
@@ -140,14 +145,32 @@ WHAT IT SHOWS
   tooltip carries the gateway and the address the internet sees, and clicking
   the row copies the three.
 - The network list as a table: the name, then the same fan symbol with the
-  generation of THAT network inside, the percentage, and a checkbox. Every
-  column but the name has a fixed width, so they begin at the same place on
-  every row.
+  generation of THAT network inside, the score, and the padlock. Every column
+  but the name has a fixed width, so they begin at the same place on every
+  row. A network with no password gets an OPEN padlock — it is never hidden,
+  because hiding it took the icon out of the layout and pulled every other
+  column out of line.
+- ACCESS POINTS ARE MEASURED, NOT GUESSED. Signal strength measures the
+  antenna, not the way out: a repeater negotiating 700 Mb/s that delivers 5
+  Mb/s of internet beats, on dBm, a router negotiating 300 that delivers 200.
+  Each radio carries a score built from NAT depth (35%), real throughput
+  (30%), round trip (20%), jitter (10%) and packet loss (5%). Signal is not
+  in the formula; it is the tiebreaker between radios nobody measured yet.
+  The measurement runs by itself right after a connection comes up, which
+  costs no interruption at all. Throughput is watched for free from the
+  interface counters; the active download test is behind a button.
+- NAT DEPTH catches a badly placed repeater when nothing else does. Two
+  private hops means the computer sits on its own subnet and stops seeing the
+  phone in the same house — and latency can be excellent while that happens.
 - A button that shows routers and repeaters instead of only the strongest of
   each name — the only way to see a repeater standing beside the unit it
-  repeats. Alphabetical there, by signal in the normal list. The checkbox
-  ties the connection to one exact radio, for the day the configuration page
-  lives on the other side of the house.
+  repeats. Alphabetical there, by signal in the normal list. Two buttons per
+  row, different things on purpose: the PIN keeps the connection on one exact
+  radio, for the day the configuration page lives on the other side of the
+  house; the STAR marks a radio as preferred, and the machine returns to it
+  while its signal stays above a cut-off you set.
+- The header says which RADIO the machine is on and whether it may leave:
+  locked, on the preferred one, or roaming freely.
 - Addresses as a list per interface: add, remove, and a suggest button that
   offers a free address verified by ping. A static address can be hung on an
   interface WITHOUT leaving DHCP, which is how you reach a factory-default
@@ -168,6 +191,18 @@ A new network opens Plasma's own network module, which is what knows how to
 ask for a password safely. This widget deliberately has no credential box of
 its own.
 
+Connections are made by profile UUID, chosen by the security of the target
+radio, with the next candidate tried when the first fails. On a radio in
+transition mode, which speaks both WPA2 and WPA3, the tie goes to WPA2: that
+is the profile which also reaches a PSK-only repeater. When no saved profile
+speaks what a radio requires, one is derived from an existing profile of the
+same network keeping the SAME passphrase — WPA2 and WPA3 use the same one, so
+there is nothing to ask. NetworkManager makes the copy; the widget never
+reads the password.
+
+Duplicate profiles for one network are reported, with a way to remove the
+extra ones: two profiles under one name mean the system picks by chance.
+
 REQUIREMENTS
 
 - Plasma 6.0 or newer
@@ -187,5 +222,6 @@ catalogue into contents/locale/<lang>/LC_MESSAGES/.
 ## Tags
 
 ```
-wifi, network, systray, indicator, networkmanager, wifi6, repeater, plasma6
+wifi, network, systray, indicator, networkmanager, wifi6, repeater, plasma6,
+roaming, latency, nat, throughput
 ```

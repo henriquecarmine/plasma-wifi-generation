@@ -24,6 +24,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 
 import org.kde.plasma.plasmoid
+import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
 import org.kde.plasma.plasma5support as P5Support
@@ -66,6 +67,69 @@ PlasmoidItem {
     property string estado:    ""
     property bool   varrendo:  false
 
+    // ---- em QUE RÁDIO estamos, e se podemos sair dele ------------------
+    //
+    // "Conectado ao wifi_zone_5G" não distingue o roteador da sala do
+    // repetidor da varanda. É uma distinção cara: um repetidor que faz NAT
+    // sobre NAT põe o computador numa sub-rede própria, e o telefone da casa,
+    // que ficou na outra, deixa de ser alcançável. Quem não vê em qual rádio
+    // entrou passa a tarde procurando o defeito no lugar errado.
+    property string bssidAtual:  ""   // o rádio em que estamos, agora
+    property string fixadoEm:    ""   // rádio a que o perfil ATIVO está amarrado
+    property string perfilAtual: ""
+    property string preferido:   ""   // rádio marcado com a estrela, deste SSID
+    property int    perfisDaRede: 0   // quantos perfis salvos disputam este nome
+
+    // ---- preferência de rádio, com histerese ---------------------------
+    property int    roamCorte:  -80
+    property int    roamMargem: 6
+    property bool   roamAuto:   false
+    property string roamAcao:   "nada"
+    property string roamPrefDbm: ""
+    // Quando o automático agiu pela última vez. Reconectar a rede é operação
+    // de segundos, e sem esta trava a leitura seguinte — que chega antes de a
+    // associação terminar — mandaria reconectar de novo, em laço.
+    property double ultimaTroca: 0
+
+    // ---- qualidade MEDIDA, por rádio -----------------------------------
+    //
+    // dBm mede a antena; isto mede a saída. Um repetidor a 700 Mb/s de taxa
+    // negociada que entrega 5 Mb/s de internet ganha de longe no dBm e perde
+    // feio aqui — e é aqui que a pergunta real é feita.
+    property var    medidas: ({})     // bssid -> {nat, rtt, jit, perda, pico, am, nota}
+    property int    notaAtual:   -1
+    property string melhorBssid: ""
+    property int    melhorNota:  -1
+    property bool   testando:    false
+
+    // Pico de vazão REAL desta passagem pelo rádio. Sai de graça dos
+    // contadores que o widget já lê a cada 2 s para desenhar as setinhas:
+    // mede o que a pessoa de fato conseguiu passar, não o que o rádio promete.
+    property double picoSessao:     0
+    property double picoGravado:    0
+    property double ultimoEnvioPico: 0
+
+    function notaDe(bssid) {
+        const q = root.medidas[(bssid || "").toLowerCase()];
+        return (q && q.am > 0) ? q.nota : -1;
+    }
+
+    // `comNota` porque o mesmo resumo serve em dois lugares: na dica da
+    // lista, onde a nota precisa vir junto, e na caixa do balão, onde ela já
+    // está em negrito ao lado — e repeti-la lia como gagueira.
+    function resumoQualidade(bssid, comNota) {
+        const q = root.medidas[(bssid || "").toLowerCase()];
+        if (!q || q.am <= 0) return i18nd(dom, "not measured yet");
+        let t = comNota ? i18nd(dom, "score %1", q.nota) + "  ·  " : "";
+        t += (q.nat > 1 ? i18nd(dom, "%1 NATs", q.nat)
+                        : i18nd(dom, "1 NAT"));
+        t += "  ·  " + Math.round(q.rtt) + " ms";
+        if (q.jit > 0) t += " ±" + q.jit.toFixed(1);
+        if (q.perda > 0) t += "  ·  " + q.perda + "%";
+        if (q.pico > 0)  t += "  ·  " + root.textoTaxa(q.pico);
+        return t;
+    }
+
     // ---------------------------------------------------------------- textos
     //
     // Tokens in, translated words out. The mapping lives here because
@@ -98,8 +162,31 @@ PlasmoidItem {
         return g === "unknown" ? i18nd(dom, "Unknown") : g;
     }
 
+    // A segurança vem do RÁDIO, não do nome da rede: numa casa onde o
+    // roteador principal fala WPA3 e o repetidor só fala WPA2, dizer "WPA2
+    // WPA3" para os dois apaga a diferença que faz a senha ser pedida de novo
+    // ao trocar de sala.
     function textoSeguranca(s) {
-        return s === "open" ? i18nd(dom, "open") : s;
+        switch (s) {
+        case "open":    return i18nd(dom, "open");
+        case "owe":     return i18nd(dom, "open (encrypted)");
+        case "wep":     return "WEP";
+        case "psk":     return "WPA2";
+        // Modo misto: o rádio ainda aceita WPA1/TKIP. Dizer só "WPA2"
+        // esconderia o que a coluna de segurança existe para mostrar.
+        case "psk-wpa1": return "WPA/WPA2";
+        case "sae":     return "WPA3";
+        case "psk-sae": return "WPA2/WPA3";
+        case "eap":     return i18nd(dom, "enterprise");
+        default:        return i18nd(dom, "unknown");
+        }
+    }
+
+    // Rede sem senha é rede sem senha, e o cadeado tem de dizer isso — ABERTO.
+    // "owe" também entra aqui: o tráfego é cifrado, mas ninguém digita nada
+    // para entrar, e é essa a pergunta que o cadeado responde.
+    function semSenha(s) {
+        return s === "open" || s === "owe";
     }
 
     // Lit arcs, 0 to 3. Connected NEVER draws zero: an earlier version let
@@ -139,7 +226,11 @@ PlasmoidItem {
                 if (interfaces.get(j).dev === dev) { achou = j; break; }
             const dados = {
                 "tipo": c[0] || "cabo", "dev": dev,
-                "ip": c[2] || "", "gw": c[3] || "", "link": c[4] || ""
+                "ip": c[2] || "", "gw": c[3] || "", "link": c[4] || "",
+                // A interface da ROTA PADRÃO — por onde o pacote realmente
+                // sai. Ter gateway não é sair por ele: com cabo e wifi
+                // ligados os dois têm gateway e só um leva o tráfego.
+                "padrao": c[5] === "1"
             };
             // Atualizar em vez de recriar: recriando, as taxas piscavam a
             // cada leitura de endereço, porque a linha nascia zerada.
@@ -148,6 +239,7 @@ PlasmoidItem {
                 interfaces.setProperty(achou, "ip",   dados.ip);
                 interfaces.setProperty(achou, "gw",   dados.gw);
                 interfaces.setProperty(achou, "link", dados.link);
+                interfaces.setProperty(achou, "padrao", dados.padrao);
             } else {
                 dados.down = 0; dados.up = 0; dados.saida = "";
                 interfaces.append(dados);
@@ -243,11 +335,31 @@ PlasmoidItem {
                 const dr = rx - ant.rx, dtx = tx - ant.tx;
                 for (let j = 0; j < interfaces.count; j++) {
                     if (interfaces.get(j).dev !== dev) continue;
-                    interfaces.setProperty(j, "down", dr  >= 0 ? dr  / dt : 0);
+                    const baixada = dr >= 0 ? dr / dt : 0;
+                    interfaces.setProperty(j, "down", baixada);
                     interfaces.setProperty(j, "up",   dtx >= 0 ? dtx / dt : 0);
+                    // Vazão REAL do rádio em que estamos, sem gerar um byte
+                    // de tráfego: é o maior valor que o uso normal alcançou.
+                    // Só conta a sem fio — a taxa do cabo não diz nada sobre
+                    // o rádio, e somá-la ali daria nota alta ao pior deles.
+                    if (interfaces.get(j).tipo === "wifi"
+                            && root.bssidAtual.length > 0
+                            && baixada > root.picoSessao)
+                        root.picoSessao = baixada;
                 }
             }
             root.contadores[dev] = { "rx": rx, "tx": tx, "ms": agora };
+        }
+        // Grava com parcimônia: só quando o pico cresceu de verdade (10%) e
+        // no máximo a cada 30 s. Sem as duas travas, uma transferência longa
+        // chamaria o script a cada dois segundos para gravar o mesmo número.
+        if (root.bssidAtual.length > 0
+                && root.picoSessao > root.picoGravado * 1.1
+                && agora - root.ultimoEnvioPico > 30000) {
+            root.picoGravado = root.picoSessao;
+            root.ultimoEnvioPico = agora;
+            exec.connectSource(root.cmd("--pico " + root.bssidAtual
+                                        + " " + Math.round(root.picoSessao)));
         }
     }
 
@@ -366,26 +478,50 @@ PlasmoidItem {
         root.linhaConfig = -1;
     }
 
-    // Qual símbolo a bandeja mostra. Regra do dono: dois enlaces com saída
-    // para rede e GATEWAYS DIFERENTES ao mesmo tempo — balanceamento ou
-    // redundância — pedem o símbolo misto; se só um estiver conectado,
-    // aparece o dele.
+    // Qual símbolo a bandeja mostra: o do meio por onde a internet SAI.
     //
-    // Gateways IGUAIS não são mix: é a mesma saída alcançada por dois
-    // caminhos, e mostrar duas marcas aí seria dizer o que não há.
+    // Quem decide é a rota padrão, não a existência de gateway. Cabo plugado
+    // com wifi ligado dá dois gateways, e só um leva o tráfego — o do cabo,
+    // que o NetworkManager põe com métrica melhor. Mostrar o leque ali é
+    // dizer que a máquina está no ar pelo wifi quando não está.
+    //
+    // ANTES havia um terceiro modo, "mix": o leque com um pontinho no canto,
+    // para quando os dois enlaces tinham gateways distintos. Saiu a pedido do
+    // dono, e com razão — o ponto não dizia coisa nenhuma a quem não tivesse
+    // lido o código que o desenhou, e a pergunta que se faz olhando a bandeja
+    // é "estou no cabo ou no wifi?", que ele não respondia. Os dois enlaces
+    // continuam listados dentro do balão, cada um com o seu endereço.
     readonly property string modoSimbolo: {
-        let comGw = [];
+        let cabo = false, wifi = false;
         for (let i = 0; i < interfaces.count; i++) {
             const it = interfaces.get(i);
-            if (it.gw && it.gw.length > 0) comGw.push(it);
+            if (it.padrao) {
+                if (it.tipo === "cabo") return "cabo";
+                return "wifi";
+            }
+            if (it.gw && it.gw.length > 0) {
+                if (it.tipo === "cabo") cabo = true; else wifi = true;
+            }
         }
-        if (comGw.length >= 2) {
-            const distintos = {};
-            for (let j = 0; j < comGw.length; j++) distintos[comGw[j].gw] = true;
-            if (Object.keys(distintos).length >= 2) return "mix";
-        }
-        if (comGw.length === 1) return comGw[0].tipo === "cabo" ? "cabo" : "wifi";
+        // Sem rota padrão ainda — cabo recém-plugado, por exemplo. O cabo
+        // ganha assim mesmo: quem acabou de plugá-lo está olhando para ele.
+        if (cabo) return "cabo";
         return "wifi";
+    }
+
+    // A dica da bandeja precisa dizer o que o símbolo não cabe dizer: qual é
+    // o OUTRO enlace, quando há dois. Sem isso, trocar o leque pelo cabo
+    // esconderia o wifi por completo de quem só olha o ícone.
+    readonly property string outroEnlace: {
+        for (let i = 0; i < interfaces.count; i++) {
+            const it = interfaces.get(i);
+            if (it.padrao) continue;
+            if (!it.gw || it.gw.length === 0) continue;
+            return it.tipo === "cabo"
+                ? i18nd(dom, "cable also connected (%1)", it.ip)
+                : i18nd(dom, "Wi-Fi also connected (%1)", it.ip);
+        }
+        return "";
     }
 
     ListModel { id: redes }
@@ -408,7 +544,10 @@ PlasmoidItem {
                 // O rádio mudou: tudo o que dependia dele está velho.
                 root.lerEstado();
                 root.lerRede();
-            } else if (source.indexOf("--perfil") >= 0) {
+            } else if (source.indexOf(" --perfil ") >= 0) {
+                // O espaço dos DOIS lados não é enfeite: "--perfil" casa
+                // dentro de "--perfis" e dentro de "--apagar-perfil", e a
+                // resposta de um ia parar no despachante do outro.
                 const c = saida.split("|");
                 root.cfgPerfil   = c[0] || "";
                 root.cfgMetodo   = (c[1] || "auto").indexOf("manual") >= 0 ? "manual" : "auto";
@@ -447,6 +586,41 @@ PlasmoidItem {
                     root.cfgSaidaPerguntada = false;
                     root.cfgSaida = saida;
                 }
+            } else if (source.indexOf("--qualidade") >= 0) {
+                root.montarQualidade(saida);
+            } else if (source.indexOf("--medir") >= 0) {
+                // A medição só grava; quem lê de volta é o --qualidade.
+                exec.connectSource(cmd("--qualidade"));
+            } else if (source.indexOf("--teste") >= 0) {
+                root.testando = false;
+                const c = saida.split("|");
+                root.avisoAcao = c[0] === "OK"
+                    ? i18nd(root.dom, "Measured: %1", root.textoTaxa(parseFloat(c[2]) || 0))
+                    : i18nd(root.dom, "Could not measure throughput.");
+                exec.connectSource(cmd("--qualidade"));
+            } else if (source.indexOf("--pico") >= 0) {
+                // Sem resposta na tela: é registro de fundo, não ação de ninguém.
+            } else if (source.indexOf("--roaming") >= 0) {
+                root.aplicarRoaming(saida);
+            } else if (source.indexOf("--limiar") >= 0) {
+                const c = saida.split("|");
+                root.roamCorte  = parseInt(c[0]) || -80;
+                root.roamMargem = parseInt(c[1]) || 6;
+                root.roamAuto   = c[2] === "1";
+            } else if (source.indexOf(" --perfis ") >= 0) {
+                root.montarPerfis(saida);
+            } else if (source.indexOf("--preferir") >= 0
+                    || source.indexOf("--despreferir") >= 0) {
+                root.lerEstado();
+                root.lerRedes();
+                root.lerRoaming();
+            } else if (source.indexOf("--apagar-perfil") >= 0) {
+                root.avisoAcao = saida.indexOf("OK|") === 0
+                    ? i18nd(root.dom, "Extra profile removed.")
+                    : i18nd(root.dom, "Could not remove that profile.");
+                root.lerEstado();
+                if (root.ssid.length > 0)
+                    exec.connectSource(cmd("--perfis " + aspas(root.ssid)));
             } else if (source.indexOf("--desfixar") >= 0) {
                 // Resposta própria: "Conectado a X" seria mentira aqui, já
                 // que soltar a amarra de propósito não reconecta nada.
@@ -471,6 +645,121 @@ PlasmoidItem {
     function lerEstado()  { exec.connectSource(cmd("--detail")); }
     function lerRede()    { exec.connectSource(cmd("--rede")); }
     function lerRadio()   { exec.connectSource(cmd("--radio")); }
+    function lerRoaming() { exec.connectSource(cmd("--roaming")); }
+    function lerPerfis()  {
+        if (root.ssid.length > 0)
+            exec.connectSource(cmd("--perfis " + aspas(root.ssid)));
+    }
+
+    // ---- preferência de rádio -----------------------------------------
+    //
+    // A estrela marca QUAL rádio se quer usar; o corte diz até que ponto ele
+    // ainda serve. Enquanto o preferido estiver acima do corte, é nele que se
+    // fica; abaixo, a amarra sai e o sistema volta a escolher sozinho.
+    //
+    // É o conserto do repetidor mal colocado: ele chega mais forte em quase
+    // toda a casa, o NetworkManager escolhe por potência e entra sempre nele,
+    // e como ele faz NAT sobre NAT o computador perde de vista o telefone que
+    // está na mesma casa. Potência não é qualidade — a preferência é o lugar
+    // onde essa diferença cabe.
+    function preferirPonto(nome, bssid) {
+        exec.connectSource(cmd("--preferir " + aspas(nome) + " " + bssid));
+    }
+    function despreferirPonto(nome) {
+        exec.connectSource(cmd("--despreferir " + aspas(nome)));
+    }
+    function ajustarLimiar(chave, valor) {
+        exec.connectSource(cmd("--limiar " + chave + " " + valor));
+    }
+
+    // O conselho do script, e o que fazer com ele.
+    //
+    // Agir é OPCIONAL e vem desligado: reconectar a rede de alguém sem que
+    // essa pessoa tenha pedido é o tipo de esperteza que se paga caro — no
+    // meio de uma chamada de vídeo, por exemplo. Ligado, respeita a trava de
+    // trinta segundos: a associação leva alguns, e a leitura seguinte chega
+    // antes dela terminar.
+    function aplicarRoaming(saida) {
+        const c = saida.split("|");
+        if (c.length < 10) return;
+        root.roamAuto    = c[0] === "1";
+        root.roamCorte   = parseInt(c[1]) || -80;
+        root.roamMargem  = parseInt(c[2]) || 6;
+        root.preferido   = c[4] || "";
+        root.roamPrefDbm = c[5] || "";
+        root.roamAcao    = c[9] || "nada";
+        root.notaAtual   = c.length > 10 && c[10].length > 0 ? parseInt(c[10]) : -1;
+        root.melhorBssid = c.length > 11 ? (c[11] || "") : "";
+        root.melhorNota  = c.length > 12 && c[12].length > 0 ? parseInt(c[12]) : -1;
+
+        if (!root.roamAuto || root.roamAcao === "nada") return;
+        const agora = Date.now();
+        if (agora - root.ultimaTroca < 30000) return;
+        root.ultimaTroca = agora;
+        const rede = c[3] || "";
+        if (rede.length === 0) return;
+        if (root.roamAcao === "fixar") {
+            root.avisoAcao = i18nd(dom, "Going back to the preferred router…");
+            exec.connectSource(cmd("--connect " + aspas(rede) + " " + root.preferido));
+        } else if (root.roamAcao === "soltar") {
+            root.avisoAcao = i18nd(dom, "Preferred below %1 dBm — roaming.",
+                                   root.roamCorte);
+            exec.connectSource(cmd("--desfixar " + aspas(rede)));
+        } else if (root.roamAcao === "trocar") {
+            root.avisoAcao = i18nd(dom, "Better router measured — switching.");
+            exec.connectSource(cmd("--connect " + aspas(rede) + " " + root.melhorBssid));
+        }
+    }
+
+    function apagarPerfil(uuid) {
+        exec.connectSource(cmd("--apagar-perfil " + uuid));
+    }
+
+    // "bssid|nat|rtt|jitter|perda|pico|amostras|nota"
+    function montarQualidade(saida) {
+        const m = {};
+        const linhas = saida.split("\n");
+        for (let i = 0; i < linhas.length; i++) {
+            const c = linhas[i].split("|");
+            if (c.length < 8) continue;
+            m[c[0].toLowerCase()] = {
+                nat:   parseInt(c[1]) || 1,
+                rtt:   parseFloat(c[2]) || 0,
+                jit:   parseFloat(c[3]) || 0,
+                perda: parseFloat(c[4]) || 0,
+                pico:  parseFloat(c[5]) || 0,
+                am:    parseInt(c[6]) || 0,
+                nota:  parseInt(c[7]) || 0
+            };
+        }
+        root.medidas = m;
+        // A nota mora TAMBÉM na linha da lista: um ListModel não reavalia
+        // ligações quando um mapa externo muda, então a medida que chega
+        // depois da lista não apareceria em linha nenhuma.
+        for (let j = 0; j < redes.count; j++)
+            redes.setProperty(j, "nota", root.notaDe(redes.get(j).bssid));
+    }
+
+    // Medir é de graça em interrupção: roda DEPOIS de a conexão já ter
+    // subido. O script recusa refazer medida com menos de dez minutos, senão
+    // uma reconexão em rajada — queda de sinal — viraria uma medição atrás
+    // da outra, e o widget seria a causa do tráfego que diz medir.
+    function medirRadio(forcar) {
+        exec.connectSource(cmd("--medir" + (forcar ? " --forcar" : "")));
+    }
+    function testarVazao() {
+        root.testando = true;
+        root.avisoAcao = i18nd(dom, "Measuring throughput…");
+        exec.connectSource(cmd("--teste"));
+    }
+
+    onBssidAtualChanged: {
+        if (root.bssidAtual.length === 0) return;
+        // Rádio novo, medida nova, e o pico recomeça: o pico é DESTE rádio.
+        root.picoSessao = 0;
+        root.picoGravado = 0;
+        root.medirRadio(false);
+    }
     function alternarRadio(ligar) {
         root.avisoAcao = "";
         exec.connectSource(cmd("--radio " + (ligar ? "on" : "off")));
@@ -541,10 +830,53 @@ PlasmoidItem {
         root.largura       = campos[7];
         root.numeroGeracao = campos[8];
         root.banda         = campos[9];
+        // Os cinco últimos são recentes e chegam com `|| ""`: um pacote
+        // atualizado pela metade — script novo, QML velho, ou o contrário —
+        // deve degradar, não quebrar a tela inteira.
+        root.bssidAtual    = campos[10] || "";
+        root.fixadoEm      = campos[11] || "";
+        root.perfilAtual   = campos[12] || "";
+        root.preferido     = campos[13] || "";
+        root.perfisDaRede  = parseInt(campos[14]) || 0;
     }
 
+    // ---- em que rádio estamos, dito em uma frase -----------------------
+    //
+    // Três estados, e a diferença entre eles é o que o dono desta máquina
+    // passou uma tarde tentando descobrir olhando a tela: preso a um rádio,
+    // livre para trocar, ou livre mas com um preferido esperando sinal.
+    readonly property string modoRadio: {
+        if (!conectado) return "";
+        if (fixadoEm.length > 0) return "fixo";
+        if (preferido.length > 0) return "preferido";
+        return "roaming";
+    }
+
+    readonly property string textoModoRadio: {
+        switch (modoRadio) {
+        case "fixo":
+            return i18nd(dom, "Locked to this router");
+        case "preferido":
+            // Curtos de propósito: a linha já carrega o MAC, que tem
+            // dezessete caracteres, e o que sobra é pouco. Frase que não cabe
+            // vira reticências, e reticências não dizem nada.
+            return bssidAtual === preferido
+                ? i18nd(dom, "on the preferred router")
+                : i18nd(dom, "roaming — preferred out of reach");
+        case "roaming":
+            return i18nd(dom, "roaming freely");
+        default:
+            return "";
+        }
+    }
+
+    readonly property string iconeModoRadio:
+        modoRadio === "fixo" ? "pin-symbolic"
+        : (modoRadio === "preferido" && bssidAtual === preferido) ? "favorite"
+        : "network-wireless-symbolic"
+
     // Uma linha por PONTO DE ACESSO:
-    //   emuso|pct|dbm|seguranca|salva|geracao|fixado|bssid|ssid
+    //   emuso|pct|dbm|seguranca|salva|geracao|fixado|preferido|bssid|ssid
     // O nome vem por último porque é o único campo que pode conter "|".
     function montarRedes(saida) {
         redes.clear();
@@ -553,7 +885,7 @@ PlasmoidItem {
         const linhas = saida.split("\n");
         for (let i = 0; i < linhas.length; i++) {
             const c = linhas[i].split("|");
-            if (c.length < 9) continue;
+            if (c.length < 10) continue;
             redes.append({
                 emUso:     c[0] === "1",
                 sinalPct:  parseInt(c[1]) || 0,
@@ -562,11 +894,35 @@ PlasmoidItem {
                 salva:     c[4] === "1",
                 geracao:   c[5],                  // "4".."7", vazio se desconhecida
                 fixado:    c[6] === "1",
-                bssid:     c[7],
-                nome:      c.slice(8).join("|")
+                preferido: c[7] === "1",
+                bssid:     c[8],
+                nota:      root.notaDe(c[8]),
+                nome:      c.slice(9).join("|")
             });
         }
     }
+
+    // Perfis salvos que disputam o nome da rede atual. Mais de um não é
+    // curiosidade de administrador: é a explicação de por que a senha é
+    // pedida de novo numa rede salva, e a tela precisa poder dizê-la.
+    ListModel { id: perfis }
+
+    function montarPerfis(saida) {
+        perfis.clear();
+        const linhas = saida.split("\n");
+        for (let i = 0; i < linhas.length; i++) {
+            const c = linhas[i].split("|");
+            if (c.length < 6) continue;
+            perfis.append({
+                uuid:   c[0],
+                nome:   c[1],
+                cripto: c[2],
+                fixo:   c[3],
+                ativo:  c[5] === "1"
+            });
+        }
+    }
+    property bool mostrarPerfis: false
 
     // Arcos acesos de cada rede da lista, pela potência medida. Os cortes são
     // os da prática: −60 é sinal folgado, −72 ainda serve para vídeo, abaixo
@@ -611,6 +967,41 @@ PlasmoidItem {
         }
     }
 
+    // ---- menu do botão direito ----------------------------------------
+    //
+    // "Configurar Wi-Fi Generation…", que o Plasma põe sozinho, abre a
+    // janela de ajustes DO WIDGET — que não tem ajuste nenhum, e portanto
+    // mostra só a aba "Sobre". Quem clica ali quer as configurações de rede
+    // DA MÁQUINA, então é isso que o menu passa a oferecer: o módulo do
+    // NetworkManager, o mesmo que a bandeja de rede do Plasma abre.
+    //
+    // A entrada interna é escondida em vez de deixada ao lado: duas linhas
+    // parecidas no mesmo menu, uma útil e outra que só mostra a versão, é
+    // convite a errar o clique todo dia.
+    Component.onCompleted: {
+        // Guardado por `typeof`: `internalAction` é API do Plasma 6, e num
+        // Plasma que não a tenha a chamada lançaria antes do `if` — levando
+        // junto todo o resto deste bloco. Esconder um item de menu não vale
+        // uma tela em branco.
+        if (typeof Plasmoid.internalAction === "function") {
+            const interna = Plasmoid.internalAction("configure");
+            if (interna) interna.visible = false;
+        }
+    }
+
+    Plasmoid.contextualActions: [
+        PlasmaCore.Action {
+            text: i18nd(root.dom, "Wi-Fi and network settings…")
+            icon.name: "configure"
+            onTriggered: exec.connectSource("kcmshell6 kcm_networkmanagement")
+        },
+        PlasmaCore.Action {
+            text: i18nd(root.dom, "Scan again")
+            icon.name: "view-refresh-symbolic"
+            onTriggered: root.varrerRedes()
+        }
+    ]
+
     Timer {
         interval: 8000
         running: true
@@ -618,6 +1009,11 @@ PlasmoidItem {
         triggeredOnStart: true
         onTriggered: {
             root.lerEstado();
+            // O roaming é vigiado com o balão FECHADO também: o preferido
+            // volta ao alcance quando a pessoa anda pela casa, não quando ela
+            // abre o widget. Vigiar só com o balão aberto seria um automático
+            // que só age enquanto alguém olha.
+            root.lerRoaming();
             if (root.expanded) root.lerRedes();
         }
     }
@@ -656,6 +1052,9 @@ PlasmoidItem {
             root.lerRede();
             root.lerRadio();
             root.avisoAcao = "";
+            root.mostrarPerfis = false;
+            root.lerRoaming();
+            root.lerPerfis();
             root.lerRedes();     // cache: the list shows at once
             root.varrerRedes();  // scan: replaces it in ~4 s
         }
@@ -664,10 +1063,19 @@ PlasmoidItem {
     toolTipMainText: conectado
         ? (textoGeracao(geracao) + " · " + ssid)
         : estado
-    toolTipSubText: conectado
-        ? i18nd(dom, "%1/%2 Mb/s  ·  %3 dBm (%4)",
-                rx, tx, sinal, textoQualidade(qualidade))
-        : ""
+    // A dica carrega o que o símbolo não cabe dizer: em qual RÁDIO se está,
+    // se dá para sair dele, e qual é o outro enlace quando há dois. Trocar o
+    // leque pelo cabo, sem isso, esconderia o wifi de quem só olha o ícone.
+    toolTipSubText: {
+        if (!conectado) return outroEnlace;
+        let t = i18nd(dom, "%1/%2 Mb/s  ·  %3 dBm (%4)",
+                      rx, tx, sinal, textoQualidade(qualidade));
+        if (bssidAtual.length > 0)
+            t += "\n" + bssidAtual + "  ·  " + textoModoRadio;
+        if (outroEnlace.length > 0)
+            t += "\n" + outroEnlace;
+        return t;
+    }
 
     // DO NOT declare `preferredRepresentation`.
     //
@@ -703,7 +1111,6 @@ PlasmoidItem {
             visible: root.modoSimbolo !== "cabo"
             barras: root.barras
             numero: root.numeroGeracao
-            modo: root.modoSimbolo
             // A tray icon does not take any size: it snaps to the standard
             // ladder (16, 22, 32…). Filling the whole square left the symbol
             // one step larger than its neighbours.
@@ -782,7 +1189,6 @@ PlasmoidItem {
                     visible: root.modoSimbolo !== "cabo"
                     barras: root.barras
                     numero: root.numeroGeracao
-                    modo: root.modoSimbolo
                     tamanho: Kirigami.Units.iconSizes.large
                     Layout.preferredWidth:  implicitWidth
                     Layout.preferredHeight: implicitHeight
@@ -825,6 +1231,41 @@ PlasmoidItem {
                     // current link. The i18n rewrite dropped the detail grid
                     // that used to carry them and they ended up shown
                     // nowhere — a regression introduced by that conversion.
+
+                    // ---- EM QUAL RÁDIO, e se dá para sair dele ---------
+                    //
+                    // A linha mais pedida deste widget. O nome da rede não
+                    // distingue o roteador da sala do repetidor da varanda,
+                    // e é essa distinção que decide se o computador enxerga
+                    // o telefone da casa — um repetidor que faz NAT sobre
+                    // NAT põe os dois em sub-redes diferentes.
+                    //
+                    // O ícone à esquerda separa fixo de roaming de relance:
+                    // alfinete é amarra, estrela é o preferido, leque é
+                    // livre. A palavra ao lado diz a mesma coisa por
+                    // extenso, porque ícone sozinho é adivinhação.
+                    RowLayout {
+                        visible: root.conectado && root.bssidAtual.length > 0
+                        Layout.fillWidth: true
+                        Layout.topMargin: Kirigami.Units.smallSpacing / 2
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Kirigami.Icon {
+                            source: root.iconeModoRadio
+                            opacity: 0.7
+                            Layout.preferredWidth:  Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        }
+
+                        PlasmaComponents.Label {
+                            text: root.bssidAtual + "  ·  " + root.textoModoRadio
+                            opacity: 0.7
+                            font: Kirigami.Theme.smallFont
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+                    }
                 }
 
                 // ---- coluna da direita: rádio, tráfego e endereços -------
@@ -1239,6 +1680,340 @@ PlasmoidItem {
                 }
             }
 
+            // ---- a QUALIDADE MEDIDA deste rádio ---------------------------
+            //
+            // A caixa que responde "que adianta conectar a 700 Mb/s e sair
+            // com cinco megas?". Nenhum número aqui vem do dBm: são saltos
+            // de NAT, ida e volta até a internet, jitter, perda e a maior
+            // vazão que o uso real já alcançou neste rádio.
+            //
+            // A medição roda sozinha ao entrar num rádio — depois de a
+            // conexão já ter subido, que é quando não custa interrupção
+            // nenhuma. O teste de vazão fica atrás de um botão porque GASTA
+            // DADO, e um widget que baixa dez megabytes por conta própria
+            // numa conexão limitada é um defeito, não um recurso.
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                visible: root.conectado && root.bssidAtual.length > 0
+                radius: Kirigami.Units.cornerRadius
+                color: Qt.alpha(Kirigami.Theme.textColor, 0.07)
+                implicitHeight: caixaQual.implicitHeight + Kirigami.Units.smallSpacing * 2
+
+                ColumnLayout {
+                    id: caixaQual
+                    anchors.fill: parent
+                    anchors.margins: Kirigami.Units.smallSpacing
+                    spacing: Kirigami.Units.smallSpacing / 2
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents.Label {
+                            text: root.notaAtual >= 0
+                                ? i18nd(root.dom, "Measured: %1", root.notaAtual)
+                                : i18nd(root.dom, "Measuring…")
+                            font.bold: true
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        }
+                        PlasmaComponents.Label {
+                            text: root.resumoQualidade(root.bssidAtual, false)
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+                        PlasmaComponents.ToolButton {
+                            icon.name: "speedometer"
+                            flat: true
+                            enabled: !root.testando
+                            implicitWidth: Kirigami.Units.iconSizes.small * 1.6
+                            implicitHeight: implicitWidth
+                            onClicked: root.testarVazao()
+                            PlasmaComponents.ToolTip.visible: hovered
+                            PlasmaComponents.ToolTip.text:
+                                i18nd(root.dom, "Measure throughput (downloads ~10 MB)")
+                        }
+                    }
+
+                    // Só aparece havendo um rádio MEDIDO melhor que este. Sem
+                    // comparação não há conselho, e uma linha dizendo "nada a
+                    // fazer" é ruído que ocupa altura em toda abertura.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: root.melhorBssid.length > 0
+                                 && root.melhorBssid !== root.bssidAtual
+                                 && root.melhorNota > root.notaAtual
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Kirigami.Icon {
+                            source: "go-jump-symbolic"
+                            opacity: 0.7
+                            Layout.preferredWidth:  Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        }
+                        PlasmaComponents.Label {
+                            text: i18nd(root.dom, "%1 measured %2", root.melhorBssid,
+                                        root.melhorNota)
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.8
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+                        PlasmaComponents.Button {
+                            text: i18nd(root.dom, "Switch")
+                            flat: true
+                            onClicked: root.fixarPonto(root.ssid, root.melhorBssid)
+                        }
+                    }
+                }
+            }
+
+            // ---- o rádio preferido, e até onde ele serve ------------------
+            //
+            // Só aparece quando há um preferido marcado nesta rede. Sem
+            // preferência, esta caixa seria uma pergunta que ninguém fez.
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                visible: root.conectado && root.preferido.length > 0
+                radius: Kirigami.Units.cornerRadius
+                // A cor da TINTA com alfa, não `opacity` no retângulo:
+                // opacidade no pai apaga o filho junto.
+                color: Qt.alpha(Kirigami.Theme.textColor, 0.07)
+                implicitHeight: caixaPref.implicitHeight + Kirigami.Units.smallSpacing * 2
+
+                ColumnLayout {
+                    id: caixaPref
+                    anchors.fill: parent
+                    anchors.margins: Kirigami.Units.smallSpacing
+                    spacing: Kirigami.Units.smallSpacing / 2
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Kirigami.Icon {
+                            source: "favorite"
+                            Layout.preferredWidth:  Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        }
+                        PlasmaComponents.Label {
+                            text: i18nd(root.dom, "Preferred router")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.6
+                        }
+                        PlasmaComponents.Label {
+                            text: root.preferido
+                                + (root.roamPrefDbm.length > 0
+                                    ? "  ·  " + root.roamPrefDbm + " dBm" : "")
+                            font: Kirigami.Theme.smallFont
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+                        PlasmaComponents.ToolButton {
+                            icon.name: "edit-delete-remove"
+                            flat: true
+                            implicitWidth: Kirigami.Units.iconSizes.small * 1.4
+                            implicitHeight: implicitWidth
+                            onClicked: root.despreferirPonto(root.ssid)
+                            PlasmaComponents.ToolTip.visible: hovered
+                            PlasmaComponents.ToolTip.text:
+                                i18nd(root.dom, "Stop preferring a router")
+                        }
+                    }
+
+                    // O CORTE, que é o "sensor de qualidade" desta caixa.
+                    //
+                    // Enquanto o preferido estiver acima dele, é nele que se
+                    // fica; abaixo, a amarra sai e o sistema escolhe sozinho.
+                    // O deslizante vai de −45 (só o rádio da sala ao lado
+                    // serve) a −85 (serve quase tudo o que se ouve), que é a
+                    // faixa em que um enlace doméstico realmente vive.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents.Label {
+                            text: i18nd(root.dom, "Give it up below")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.6
+                        }
+                        PlasmaComponents.Slider {
+                            id: corteSlider
+                            from: -85; to: -45; stepSize: 1
+                            value: root.roamCorte
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            // `onMoved`, não `onValueChanged`: este último
+                            // dispara também quando a leitura do sistema
+                            // move o controle, e gravaria de volta o que
+                            // acabou de ler, a cada oito segundos.
+                            onMoved: root.ajustarLimiar("corte", Math.round(value))
+                        }
+                        PlasmaComponents.Label {
+                            text: Math.round(corteSlider.value) + " dBm"
+                            font: Kirigami.Theme.smallFont
+                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                            Layout.minimumWidth:   Kirigami.Units.gridUnit * 4
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents.CheckBox {
+                            checked: root.roamAuto
+                            text: i18nd(root.dom, "Switch on its own")
+                            font: Kirigami.Theme.smallFont
+                            onToggled: root.ajustarLimiar("auto", checked ? 1 : 0)
+                            PlasmaComponents.ToolTip.visible: hovered
+                            PlasmaComponents.ToolTip.text: i18nd(root.dom,
+                                "Switches by itself. Off, only warns.")
+                        }
+                        Item { Layout.fillWidth: true }
+                        // O conselho vira BOTÃO quando o automático está
+                        // desligado: dizer "dá para voltar" e não oferecer o
+                        // caminho de volta seria informação sem saída.
+                        PlasmaComponents.Button {
+                            visible: !root.roamAuto && root.roamAcao === "fixar"
+                            text: i18nd(root.dom, "Go back to it now")
+                            icon.name: "go-jump-symbolic"
+                            flat: true
+                            onClicked: root.fixarPonto(root.ssid, root.preferido)
+                        }
+                        PlasmaComponents.Label {
+                            visible: !root.roamAuto && root.roamAcao === "soltar"
+                            text: i18nd(root.dom, "too weak — release it")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.6
+                        }
+                    }
+                }
+            }
+
+            // ---- perfis duplicados para o mesmo nome de rede ---------------
+            //
+            // Acontece sozinho numa casa cujo roteador anuncia WPA2 e WPA3 ao
+            // mesmo tempo (modo de transição): ao entrar pelo lado WPA3, o
+            // sistema trata aquilo como rede nova, pede a senha e grava um
+            // SEGUNDO perfil — mesmo nome, mesmo SSID, key-mgmt `sae`. O
+            // pedido de senha é a CAUSA da duplicata, não a consequência dela.
+            //
+            // Cuidado com a explicação fácil: eu cheguei a escrever aqui que a
+            // duplicata fazia o sistema pedir a senha de novo. O journal do
+            // NetworkManager desmente — "connection has security, and secrets
+            // exist. No new secrets needed." —, os dois perfis têm a senha em
+            // disco com psk-flags 0, e o `need-auth` que aparece no log dura
+            // trinta milissegundos e não chega a ninguém.
+            //
+            // O que a duplicata custa de verdade: a cada conexão o sistema
+            // escolhe UM dos dois ao acaso, e o perfil `sae` só entra no
+            // roteador — o repetidor fala apenas PSK. Cair nele é ficar preso
+            // a um aparelho só. Por isso o widget prefere o perfil WPA2 em
+            // rádio de transição, e esta caixa oferece apagar o que sobra.
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                visible: root.conectado && root.perfisDaRede > 1
+                spacing: Kirigami.Units.smallSpacing / 2
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Kirigami.Icon {
+                        source: "dialog-warning"
+                        Layout.preferredWidth:  Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                    }
+                    PlasmaComponents.Label {
+                        text: i18ndp(root.dom,
+                            "%1 saved profile for this network",
+                            "%1 saved profiles for this network", root.perfisDaRede)
+                        font: Kirigami.Theme.smallFont
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                    }
+                    PlasmaComponents.Button {
+                        text: root.mostrarPerfis ? i18nd(root.dom, "Hide")
+                                                 : i18nd(root.dom, "Sort it out")
+                        flat: true
+                        onClicked: {
+                            root.mostrarPerfis = !root.mostrarPerfis;
+                            if (root.mostrarPerfis) root.lerPerfis();
+                        }
+                    }
+                }
+
+                PlasmaComponents.Label {
+                    visible: root.mostrarPerfis
+                    // O texto diz o que se PODE provar. A primeira versão
+                    // culpava a duplicata pelo pedido de senha; o journal do
+                    // NetworkManager mostrou que os dois perfis têm a senha
+                    // guardada e que ninguém é perguntado. O que sobra, e é
+                    // verdade, é que dois perfis para uma rede é uma escolha
+                    // ao acaso a cada conexão.
+                    text: i18nd(root.dom,
+                        "Two profiles for one network: the system picks by chance. Keep one.")
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.6
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                Repeater {
+                    model: root.mostrarPerfis ? perfis : null
+
+                    delegate: RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents.Label {
+                            text: model.nome
+                            font.bold: model.ativo
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                        }
+                        PlasmaComponents.Label {
+                            text: root.textoSeguranca(
+                                model.cripto === "sae" ? "sae"
+                                : model.cripto === "wpa-psk" ? "psk" : "open")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.6
+                        }
+                        PlasmaComponents.Label {
+                            visible: model.ativo
+                            text: i18nd(root.dom, "in use")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.6
+                        }
+                        // Apagar o perfil EM USO derrubaria a conexão que a
+                        // pessoa está usando para ler esta tela. O botão
+                        // some ali — desabilitado, ainda convidaria ao clique.
+                        PlasmaComponents.ToolButton {
+                            visible: !model.ativo
+                            icon.name: "edit-delete-remove"
+                            flat: true
+                            implicitWidth: Kirigami.Units.iconSizes.small * 1.4
+                            implicitHeight: implicitWidth
+                            onClicked: root.apagarPerfil(model.uuid)
+                            PlasmaComponents.ToolTip.visible: hovered
+                            PlasmaComponents.ToolTip.text:
+                                i18nd(root.dom, "Remove this profile")
+                        }
+                    }
+                }
+            }
+
             PlasmaComponents.Label {
                 visible: root.avisoAcao.length > 0
                 text: root.avisoAcao
@@ -1335,7 +2110,7 @@ PlasmoidItem {
                 boundsBehavior: Flickable.StopAtBounds
                 spacing: 0
 
-                QQC2.ScrollBar.vertical: PlasmaComponents.ScrollBar { }
+                QQC2.ScrollBar.vertical: PlasmaComponents.ScrollBar { id: barra }
 
                 delegate: Rectangle {
                     width: lista.width
@@ -1367,7 +2142,13 @@ PlasmoidItem {
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: Kirigami.Units.smallSpacing
+                        // A barra de rolagem passa POR CIMA da última coluna:
+                        // ela é sobreposta, não reserva espaço. Sem abrir
+                        // caminho para ela, o cadeado da direita ficava
+                        // cortado ao meio em toda lista que rolasse — e é
+                        // justamente a lista cheia que rola.
                         anchors.rightMargin: Kirigami.Units.smallSpacing
+                            + (lista.contentHeight > lista.height ? barra.width : 0)
                         spacing: Kirigami.Units.smallSpacing
 
                         PlasmaComponents.Label {
@@ -1423,49 +2204,136 @@ PlasmoidItem {
                             }
                         }
 
+                        // Medido, mostra a NOTA; sem medida, a porcentagem
+                        // de sinal. Não é enfeite: o sinal foi justamente o
+                        // critério que errou — 700 Mb/s de taxa negociada
+                        // saindo com cinco megas de internet. Onde existe
+                        // medida, ela toma o lugar do palpite, e o palpite
+                        // desce para a dica.
+                        //
+                        // Percentual não passa por catálogo: "%1%" fazia o
+                        // gettext desconfiar do "%" final e rebaixar a
+                        // tradução a fuzzy — e fuzzy fica em inglês.
                         PlasmaComponents.Label {
-                            // Percentual não passa por catálogo: "%1%" fazia o gettext desconfiar
-                            // do "%" final e rebaixar a tradução a fuzzy — e fuzzy fica em inglês.
-                            text: model.sinalPct + "%"
-                            opacity: 0.6
-                            font: Kirigami.Theme.smallFont
+                            text: model.nota >= 0 ? model.nota
+                                                  : model.sinalPct + "%"
+                            opacity: model.nota >= 0 ? 0.95 : 0.6
+                            font.bold: model.nota >= 0 && model.nota >= 70
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
                             horizontalAlignment: Text.AlignRight
                             Layout.preferredWidth: janela.colPct
                             Layout.minimumWidth:   janela.colPct
                             Layout.maximumWidth:   janela.colPct
+
+                            PlasmaComponents.ToolTip.visible: areaNota.containsMouse
+                            PlasmaComponents.ToolTip.text:
+                                root.resumoQualidade(model.bssid, true)
+                                + "\n" + model.sinalPct + "%  ·  "
+                                + model.dbm + " dBm"
+                            MouseArea {
+                                id: areaNota
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
                         }
 
-                        // "Conectar só neste roteador."
+                        // ESTRELA e ALFINETE, e só no modo que mostra cada
+                        // aparelho. Fora dele há uma linha por nome de rede, e
+                        // escolher entre rádios que não estão à vista é
+                        // escolher no escuro.
                         //
-                        // Numa casa com repetidor, o NetworkManager entra
-                        // pelo sinal mais forte — que é o repetidor, e não o
-                        // aparelho principal onde mora a configuração. Marcar
-                        // aqui amarra o perfil a este rádio e sobe a conexão;
-                        // desmarcar solta, sem reconectar.
+                        // São duas coisas diferentes, de propósito:
                         //
-                        // Desabilitada em rede não salva: a amarra se escreve
-                        // no perfil, e perfil ainda não existe. Fica visível
-                        // mesmo assim, para a coluna não dançar de linha em
-                        // linha.
-                        PlasmaComponents.CheckBox {
+                        //   ★ preferir — intenção. Volta-se para este rádio
+                        //     quando ele tiver sinal suficiente, e larga-se
+                        //     quando não tiver. É o conserto do repetidor que
+                        //     chega mais forte que o roteador em toda a casa
+                        //     e, fazendo NAT sobre NAT, esconde o telefone da
+                        //     sala do computador do quarto.
+                        //
+                        //   📌 amarrar — ordem. Fica-se NESTE rádio, sinal
+                        //     bom ou ruim, até alguém soltar. Serve para
+                        //     entrar no roteador principal e configurá-lo.
+                        //
+                        // Ambos desabilitados em rede não salva: os dois se
+                        // escrevem no perfil, e perfil ainda não existe. Ficam
+                        // visíveis assim mesmo, para a coluna não dançar de
+                        // linha em linha.
+                        PlasmaComponents.ToolButton {
+                            visible: root.mostrarTodos
+                            icon.name: model.preferido ? "favorite" : "rating-unrated"
+                            flat: true
+                            checkable: true
+                            checked: model.preferido
+                            enabled: model.salva
+                            opacity: model.salva ? 1.0 : 0.3
+                            implicitWidth: Kirigami.Units.iconSizes.small * 1.7
+                            implicitHeight: implicitWidth
+                            onToggled: checked
+                                ? root.preferirPonto(model.nome, model.bssid)
+                                : root.despreferirPonto(model.nome)
+                            PlasmaComponents.ToolTip.visible: hovered
+                            PlasmaComponents.ToolTip.text: model.salva
+                                ? i18nd(root.dom, "Prefer this router while its signal holds")
+                                : i18nd(root.dom, "Save the network first")
+                        }
+
+                        PlasmaComponents.ToolButton {
+                            visible: root.mostrarTodos
+                            icon.name: "pin-symbolic"
+                            flat: true
+                            checkable: true
                             checked: model.fixado
                             enabled: model.salva
                             opacity: model.salva ? 1.0 : 0.3
+                            implicitWidth: Kirigami.Units.iconSizes.small * 1.7
+                            implicitHeight: implicitWidth
                             onToggled: checked
                                 ? root.fixarPonto(model.nome, model.bssid)
                                 : root.soltarPonto(model.nome)
                             PlasmaComponents.ToolTip.visible: hovered
                             PlasmaComponents.ToolTip.text: model.salva
-                                ? i18nd(root.dom, "Connect only to this router")
+                                ? i18nd(root.dom, "Stay on this router only")
                                 : i18nd(root.dom, "Save the network first")
                         }
 
+                        // O CADEADO OCUPA LUGAR SEMPRE.
+                        //
+                        // Com `visible: false` num RowLayout o item sai da
+                        // conta e a linha inteira encolhe: uma rede aberta no
+                        // meio da lista puxava para a direita tudo o que
+                        // estava à sua esquerda, e as colunas deixavam de
+                        // começar no mesmo x. Rede aberta é o caso raro,
+                        // então o defeito só aparecia na casa de quem tinha
+                        // uma — e ali aparecia em todas as linhas de uma vez.
+                        //
+                        // Agora ele não some: MUDA. Sem senha, cadeado
+                        // ABERTO — que é a informação que estava faltando, e
+                        // não a mesma informação escondida.
                         Kirigami.Icon {
-                            visible: model.seguranca !== "open"
-                            source: "object-locked-symbolic"
-                            opacity: model.salva ? 0.75 : 0.35
+                            source: root.semSenha(model.seguranca)
+                                ? "object-unlocked-symbolic"
+                                : "object-locked-symbolic"
+                            // Aberto tem peso próprio: é aviso de que não há
+                            // senha, não decoração apagada. O desbotado
+                            // continua querendo dizer "rede não salva".
+                            opacity: root.semSenha(model.seguranca)
+                                ? 0.9 : (model.salva ? 0.75 : 0.35)
                             Layout.preferredWidth:  Kirigami.Units.iconSizes.small
                             Layout.preferredHeight: Kirigami.Units.iconSizes.small
+
+                            PlasmaComponents.ToolTip.visible: areaSeg.containsMouse
+                            PlasmaComponents.ToolTip.text:
+                                root.textoSeguranca(model.seguranca)
+                                + (model.salva ? "" : "  ·  "
+                                    + i18nd(root.dom, "not saved"))
+                            MouseArea {
+                                id: areaSeg
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
                         }
                     }
                 }
@@ -1487,10 +2355,17 @@ PlasmoidItem {
             // curtas. Ícone que precisa de explicação ou ganha legenda, ou
             // vira adivinhação — e quem usa este widget nem sempre é quem o
             // escreveu.
+            // A legenda ensina os símbolos que a lista está mostrando AGORA.
+            // Ensinar a estrela e o alfinete no modo simples, onde eles nem
+            // aparecem, seria mandar procurar o que não está lá.
             PlasmaComponents.Label {
-                text: i18nd(root.dom, "Number in the fan: Wi-Fi generation.")
-                    + "  " + i18nd(root.dom, "Dimmed padlock: network not saved.")
-                    + "  " + i18nd(root.dom, "Checkbox: stay on this router.")
+                text: i18nd(root.dom, "Fan number: generation.")
+                    + "  " + i18nd(root.dom, "Open padlock: no password.")
+                    + "  " + i18nd(root.dom, "Dimmed: not saved.")
+                    + (root.mostrarTodos
+                        ? "  " + i18nd(root.dom, "Star: preferred router.")
+                          + "  " + i18nd(root.dom, "Pin: locked to it.")
+                        : "")
                 font: Kirigami.Theme.smallFont
                 opacity: 0.5
                 wrapMode: Text.WordWrap

@@ -15,7 +15,7 @@
 %global clamp_mtime_to_source_date_epoch 0
 
 Name:           plasma-applet-wifi-generation
-Version:        1.7
+Version:        1.8
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -75,6 +75,75 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Mon Aug 31 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8-1
+- ACCESS POINTS ARE NOW MEASURED, NOT GUESSED. Signal strength measures the
+  antenna, not the way out: a repeater negotiating 700 Mb/s that delivers 5
+  Mb/s of internet beats, on dBm, a router negotiating 300 that delivers 200.
+  Each radio now carries a score built from NAT depth, round trip to the
+  internet, jitter, packet loss and the largest throughput real use has ever
+  reached through it. The list shows the score in place of the percentage
+  wherever a measurement exists, and the percentage moves to the tooltip.
+- The measurement runs by itself right after a connection comes up, which is
+  the one moment it costs no interruption at all, and refuses to repeat
+  itself within ten minutes. Throughput is watched for free — the widget
+  already reads the interface counters every two seconds — and the active
+  download test lives behind a button because it spends data.
+- NAT DEPTH is what catches a badly placed repeater when nothing else does.
+  Measured here, latency was excellent (10 ms, 1.2 ms of jitter, no loss) on
+  a link sitting behind two private hops: the computer on one subnet, the
+  phone in the same house on another, unable to see each other. Only hops in
+  RFC1918 count. RFC 6598 (100.64/10) does not: providers number access
+  transport from it as often as they use it for CGNAT, and a subscriber with
+  a fixed public address sees that hop without being translated at all.
+- The padlock no longer disappears on a network without a password: it OPENS.
+  Hiding it took the icon out of the row's layout, so one open network pulled
+  every column of every row out of line.
+- Security is read PER RADIO from the kernel, not per network name from
+  NetworkManager, which aggregates the two into one answer. A radio in mixed
+  WPA/WPA2 mode now says so instead of claiming plain WPA2 — WPA1 brings
+  TKIP, and hiding that is the opposite of what the column is for.
+- Connections are made by profile UUID, chosen by the security of the target
+  radio, and the next candidate is tried when the first fails. On a radio in
+  transition mode, which speaks both WPA2 and WPA3, the tie goes to WPA2:
+  that is the profile which also works on the PSK-only repeater, and it is
+  the only one that roams across the whole house.
+- When no saved profile speaks what a radio requires, one is DERIVED from an
+  existing profile of the same network, keeping the same passphrase — WPA2
+  and WPA3 use the same one, so there is nothing to ask anyone. The copy is
+  made by NetworkManager itself; this widget never reads the password. The
+  derived profile is discarded if it fails to connect.
+- Duplicate profiles for one network are reported, with a way to remove the
+  extra ones. Two profiles under one name mean the system picks by chance,
+  and the losing pick may reach only one of the radios.
+- The header says which RADIO the machine is on and whether it may leave:
+  locked to one, on the preferred one, or roaming freely. The network name
+  alone does not tell the router in the living room from the repeater on the
+  balcony.
+- A radio can be PREFERRED by MAC, with a signal cut-off and a dead band, so
+  the machine keeps it while it holds and gives it up only when it does not.
+  Automatic switching is optional and off by default.
+- The tray icon follows the DEFAULT ROUTE: the cable icon when the cable
+  carries the traffic. The dot that used to mark a second link is gone — it
+  said nothing to anyone who had not read the code that drew it.
+- Access points are forgotten after five minutes, and a manual scan forgets
+  whatever it did not hear. Networks that no longer exist used to stay in the
+  list forever, and pressing rescan only made the list longer.
+- The context menu opens the system's Wi-Fi settings instead of an about box
+  for a widget that has nothing to configure.
+- Fixed: the merge of remembered access points let the OLD signal reading
+  overwrite the one just measured, so the list showed the previous scan's
+  strength — the worst possible number for deciding which radio to enter.
+- Fixed: helpers were defined after the code that called them, so the first
+  --connect of a session read an empty security for the target radio.
+- Fixed: reading tab-separated records with `read` collapsed consecutive
+  tabs, so an empty field shifted every column after it — a profile bound to
+  no radio reported its timestamp as a MAC address.
+- Fixed: `--rede` and `--taxa` answered "nowifi" on a machine with no
+  wireless card, hiding the cable it was asked about.
+- build.sh now refuses to package QML carrying a duplicate property name. Qt
+  only complains when loading, and the popup comes up blank; it cost a
+  version that was packaged and installed before anyone opened it.
+
 * Sun Aug 16 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.7-1
 - The network list became a TABLE: the name on the left, then the same fan
   symbol the tray shows — arcs for strength, generation number inside — the

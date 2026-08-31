@@ -17,6 +17,23 @@ cd "$HERE"
 
 echo "== Wi-Fi Generation $VERSION =="
 
+# 0. Recusar QML com PROPRIEDADE REPETIDA.
+#
+# O Qt só reclama disso ao CARREGAR — "Duplicate property name" —, e aí a
+# tela vem em branco. Não há qmllint garantido nesta máquina, e o erro é
+# fácil de cometer: a propriedade nova esbarra numa antiga a mil linhas de
+# distância, com nome plausível. Custou uma versão empacotada e instalada
+# antes de alguém abrir o widget e ver o balão vazio.
+for qml in package/contents/ui/*.qml; do
+	dup=$(grep -oP '^\s*(readonly\s+)?property\s+\S+\s+\K\w+' "$qml" \
+	      | sort | uniq -d)
+	if [ -n "$dup" ]; then
+		echo "ERRO: propriedade repetida em $qml:" >&2
+		printf '  %s\n' $dup >&2
+		exit 1
+	fi
+done
+
 # 1. Refresh the template from the source, so a forgotten string shows up.
 xgettext --from-code=UTF-8 --language=JavaScript \
 	--keyword=i18nd:2 --keyword=i18ndp:2,3 \

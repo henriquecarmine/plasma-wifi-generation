@@ -16,91 +16,66 @@
 # Words shown to the user are translated in QML, where gettext can reach
 # them. A shell script cannot be put through a message catalogue, so any
 # human-readable string produced here would be permanently untranslatable.
+#
+# LAYOUT — every helper is defined FIRST, and only then do the `--flag`
+# blocks run. Bash executes as it parses: a block that called a function
+# written further down found nothing there and failed silently, which is how
+# the security of an access point came out empty on the very first --connect.
 set -uo pipefail
 
-# Saved Wi-Fi profiles, one per line, as "ssid<TAB>profile_name".
+# A interface precisa ser conhecida ANTES de qualquer varredura: a geração de
+# cada rede sai de `iw dev <if> scan dump`, e com IF vazio o campo saía em
+# branco. Fica vazia numa máquina só de cabo, e isso é legítimo — o que
+# depende dela testa antes de usar.
+IF=$(iw dev 2>/dev/null | awk '/[[:space:]]Interface /{print $2; exit}')
+
+# ============================================================ perfis salvos
 #
-# The PROFILE name is not the SSID. Comparing an SSID against a profile name
-# makes a saved network look new, and the click then tries to bring up a
-# profile that does not exist.
-_wifi_profiles() {
-	/usr/bin/nmcli -t -f NAME,TYPE connection show 2>/dev/null \
-	| awk -F: '$NF ~ /wireless/ { NF--; print }' OFS=: \
-	| while IFS= read -r name; do
-		[ -n "$name" ] || continue
-		s=$(/usr/bin/nmcli -g 802-11-wireless.ssid connection show "$name" 2>/dev/null)
-		[ -n "$s" ] && printf '%s\t%s\n' "$s" "$name"
+# Um perfil por linha: "ssid<TAB>uuid<TAB>nome<TAB>keymgmt<TAB>bssid<TAB>ts".
+#
+# O UUID vem junto porque é a ÚNICA chave que identifica um perfil sem
+# ambiguidade. Dois perfis podem ter o mesmo NOME e o mesmo SSID — foi o que
+# aconteceu numa casa onde o roteador principal fala WPA3-SAE e o repetidor
+# só fala WPA2-PSK: o NetworkManager guardou dois "wifi_zone_5G", um de cada
+# criptografia. Subir por nome ali é sorteio, e quando sai o perfil da
+# criptografia errada a associação falha e o sistema PEDE A SENHA de novo —
+# numa rede que o dono jurava ter salvado. O celular não pergunta porque
+# trata os dois rádios com um perfil só.
+#
+# `nmcli -t -f <propriedades>` devolve "nome:valor" por linha e simplesmente
+# OMITE a propriedade ausente. Com `-g` a linha some sem aviso e todos os
+# campos seguintes escorregam uma casa — numa rede aberta, que não tem
+# `802-11-wireless-security`, o timestamp saía no lugar do key-mgmt.
+_perfis() {
+	/usr/bin/nmcli -t -f UUID,TYPE connection show 2>/dev/null \
+	| awk -F: '$2 ~ /wireless/ {print $1}' \
+	| while IFS= read -r u; do
+		[ -n "$u" ] || continue
+		/usr/bin/nmcli -t -f 802-11-wireless.ssid,connection.id,802-11-wireless-security.key-mgmt,802-11-wireless.bssid,connection.timestamp \
+			connection show "$u" 2>/dev/null \
+		| awk -F: -v u="$u" '
+			{ v = substr($0, index($0, ":") + 1); gsub(/\\/, "", v); d[$1] = v }
+			END {
+				if (d["802-11-wireless.ssid"] == "") exit
+				km = d["802-11-wireless-security.key-mgmt"]
+				bs = tolower(d["802-11-wireless.bssid"])
+				# Campo vazio vira "-". Um `read` com IFS de TABULAÇÃO
+				# funde tabulações seguidas numa só — é regra do shell
+				# para separador em branco — e a linha inteira escorrega
+				# uma casa quando o perfil não está amarrado a rádio
+				# nenhum. Foi assim que o timestamp saiu no lugar do MAC.
+				printf "%s\t%s\t%s\t%s\t%s\t%s\n",
+					d["802-11-wireless.ssid"], u, d["connection.id"],
+					(km == "" ? "-" : km), (bs == "" ? "-" : bs),
+					(d["connection.timestamp"] == "" ? 0 : d["connection.timestamp"])
+			}'
 	done
 }
 
-# --connect <ssid>: bring up an ALREADY SAVED connection, and say what happened.
+# ======================================================== rádios ao alcance
 #
-# Lives here, not in a command line assembled in QML, for two reasons: the
-# nmcli path stays absolute (Plasma's "executable" engine does not guarantee
-# PATH), and the error is CAPTURED instead of discarded. The first version
-# called nmcli straight from the widget without looking at output or exit
-# code — it failed silently, which is the costliest kind of defect.
-#
-# Emits "OK|<detail>" or "FAIL|<detail>". The detail comes from nmcli, which
-# is itself localised by the system, so it is passed through untouched.
-# --connect <ssid> [bssid]
-#
-# Com BSSID, o perfil é AMARRADO àquele rádio antes de subir. É o que resolve
-# o caso do repetidor: numa casa com dois rádios anunciando o mesmo nome, o
-# NetworkManager escolhe pelo sinal, e nem sempre é onde você quer entrar —
-# para configurar o principal, por exemplo. Sem BSSID, a amarra é DESFEITA,
-# senão o perfil ficaria preso a um rádio que pode nem existir amanhã.
-if [ "${1:-}" = "--connect" ]; then
-	target="${2:-}"
-	fixar="${3:-}"
-	[ -n "$target" ] || { echo "FAIL|noname"; exit 1; }
-	profile=$(_wifi_profiles | awk -F'\t' -v a="$target" '$1==a {print $2; exit}')
-	alvo_perfil="${profile:-$target}"
-	if [ -n "$fixar" ]; then
-		/usr/bin/nmcli connection modify "$alvo_perfil" 802-11-wireless.bssid "$fixar" >/dev/null 2>&1
-	else
-		/usr/bin/nmcli connection modify "$alvo_perfil" 802-11-wireless.bssid "" >/dev/null 2>&1
-	fi
-	out=$(/usr/bin/nmcli con up id "$alvo_perfil" 2>&1); rc=$?
-	# On-disk trail: without it, "I clicked and nothing happened" cannot be
-	# diagnosed from outside — no way to tell whether the click arrived, the
-	# command ran, or what nmcli answered.
-	{
-		echo "--- $(date '+%F %T') ---"
-		echo "requested: $target"
-		echo "profile  : ${profile:-(none, used the ssid itself)}"
-		echo "rc       : $rc"
-		echo "nmcli    : $out"
-	} >> "${XDG_CACHE_HOME:-$HOME/.cache}/wifi-generation.log" 2>/dev/null
-	if [ $rc -eq 0 ]; then
-		echo "OK|$target"
-	else
-		reason=$(printf '%s' "$out" | tail -1 | sed 's/^Error: //')
-		echo "FAIL|${reason:-exit $rc}"
-	fi
-	exit 0
-fi
-
-# --desfixar <ssid>: solta o perfil do rádio a que ele estava amarrado.
-#
-# Separado do --connect de propósito: desfixar NÃO reconecta. Quem tira a
-# amarra costuma estar de saída do lugar — reconectar ali seria desfazer o
-# que a pessoa acabou de pedir.
-if [ "${1:-}" = "--desfixar" ]; then
-	alvo="${2:-}"
-	[ -n "$alvo" ] || { echo "FAIL|noname"; exit 1; }
-	perfil=$(_wifi_profiles | awk -F'\t' -v a="$alvo" '$1==a {print $2; exit}')
-	[ -n "$perfil" ] || { echo "FAIL|noprofile"; exit 1; }
-	if /usr/bin/nmcli connection modify "$perfil" 802-11-wireless.bssid "" >/dev/null 2>&1; then
-		echo "OK|$alvo"
-	else
-		echo "FAIL|$alvo"
-	fi
-	exit 0
-fi
-
 # Pontos de acesso vistos, UM POR LINHA, do cache de varredura do kernel:
-#   "bssid<TAB>dbm<TAB>geracao<TAB>freq<TAB>ssid"
+#   "bssid<TAB>dbm<TAB>geracao<TAB>freq<TAB>seguranca<TAB>epoca<TAB>ssid"
 #
 # Por PONTO DE ACESSO, não por nome de rede. É o que permite ver as
 # concorrentes — dois rádios anunciando o mesmo SSID, caso de qualquer casa
@@ -109,22 +84,61 @@ fi
 # `iw scan dump` lê o cache e roda sem root; `iw scan` dispararia varredura e
 # exigiria privilégio. O NetworkManager não expõe geração nenhuma e o
 # wpa_supplicant nega o barramento a usuário comum.
+#
+# A SEGURANÇA sai daqui, do RÁDIO, e não do `nmcli dev wifi list`, que a
+# agrega por NOME DE REDE. Numa casa onde o principal fala WPA3 e o repetidor
+# só fala WPA2, a agregação diz "WPA2 WPA3" para os dois e apaga justamente a
+# diferença que faz a conexão pedir senha ao trocar de sala.
 _pontos() {
 	[ -n "${IF:-}" ] || return 0
-	cache="${XDG_CACHE_HOME:-$HOME/.cache}/wifi-geracao-pontos.tsv"
+	# Prazo da memória, em segundos. Cinco minutos no uso comum; noventa
+	# segundos logo depois de uma varredura de verdade, quando a leitura
+	# recém-feita é a autoridade e o que ela não viu não está lá.
+	prazo="${1:-300}"
+	cache="${XDG_CACHE_HOME:-$HOME/.cache}/wifi-geracao-radios.tsv"
+	agora=$(date +%s)
 
 	# O registro fecha no PRÓXIMO "BSS": no `iw`, "last seen" e "signal" vêm
 	# ANTES do SSID e das capacidades, e fechar numa linha interna gravava
 	# registro vazio.
-	visto=$(iw dev "$IF" scan dump 2>/dev/null | awk '
-		function fecha() {
-			if (bssid != "" && ssid != "")
-				printf "%s\t%s\t%d\t%s\t%s\n", bssid, dbm, g, freq, ssid
+	visto=$(iw dev "$IF" scan dump 2>/dev/null | awk -v ts="$agora" '
+		function seguranca() {
+			if (rsn || wpa1) {
+				if (auth ~ /802\.1X|EAP/)         return "eap"
+				if (auth ~ /OWE/)                 return "owe"
+				if (auth ~ /SAE/ && auth ~ /PSK/) return "psk-sae"
+				if (auth ~ /SAE/)                 return "sae"
+				# WPA1 ao lado do RSN é MODO MISTO, e a diferença importa:
+				# o WPA1 traz TKIP, que está quebrado há anos. Chamar isso de
+				# "WPA2" liso esconde que o rádio ainda aceita o velho — e
+				# quem lê a coluna de segurança está lendo justamente para
+				# saber disso. É a configuração de fábrica de muito
+				# repetidor doméstico.
+				if (auth ~ /PSK/ && rsn && wpa1)  return "psk-wpa1"
+				if (auth ~ /PSK/)                 return "psk"
+				return "rsn"
+			}
+			return priv ? "wep" : "open"
 		}
-		/^BSS /            { fecha(); bssid=substr($2,1,17); ssid=""; g=0; dbm=""; freq="" }
+		function fecha() {
+			if (bssid == "" || ssid == "") return
+			# Nenhum campo sai vazio: quem lê do outro lado é um `read`
+			# com IFS de tabulação, e tabulações seguidas contam como uma
+			# só — um rádio sem leitura de sinal empurrava o SSID para a
+			# coluna da frequência.
+			printf "%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+				bssid, (dbm == "" ? "-100" : dbm), g,
+				(freq == "" ? "0" : freq), seguranca(), ts, ssid
+		}
+		/^BSS /            { fecha(); bssid=substr($2,1,17); ssid=""; g=0
+		                     dbm=""; freq=""; rsn=0; wpa1=0; priv=0; auth="" }
+		/^\tcapability: /  { if ($0 ~ /Privacy/) priv=1 }
 		/^\tfreq: /        { freq=$2 }
 		/^\tsignal: /      { dbm=$2 }
 		/^\tSSID: /        { ssid=substr($0, 8) }
+		/^\tRSN:/          { rsn=1 }
+		/^\tWPA:/          { wpa1=1 }
+		/Authentication suites:/ { auth = auth " " $0 }
 		/EHT capabilities/ { if (g<7) g=7 }
 		/HE capabilities/  { if (g<6) g=6 }
 		/VHT capabilities/ { if (g<5) g=5 }
@@ -140,142 +154,169 @@ _pontos() {
 	# arquivo era truncado enquanto a substituição ainda tentava lê-lo, e cada
 	# chamada perdia parte do que já sabia — a lista encolhia sozinha entre
 	# duas varreduras seguidas.
+	#
+	# A memória tem PRAZO, e o prazo é o conserto de um defeito com nome
+	# próprio: rede que não existe mais ficava na lista PARA SEMPRE. O vizinho
+	# que mudou de bairro, o roteador de hotel, o celular de alguém que passou
+	# — tudo entrava e nada saía, e apertar o botão de varrer de novo não
+	# limpava nada, porque a varredura só ACRESCENTAVA ao que já havia.
+	#
+	# Agora o botão de varrer manda: logo depois de uma varredura real o prazo
+	# cai para noventa segundos, e o que a leitura nova não ouviu sai da
+	# lista. Nas leituras de cache o prazo é de cinco minutos, que cobre o
+	# rádio que falha uma varredura por estar em outro canal sem apagar quem
+	# está de fato ali.
 	antigo=$(cat "$cache" 2>/dev/null)
 	fundido=$(printf '%s\n%s\n' "$visto" "$antigo" \
-	| awk -F'\t' 'NF>=5 && $1!="" {
+	| awk -F'\t' -v agora="$agora" -v prazo="$prazo" \
+	  'NF>=7 && $1!="" && agora - $6 < prazo {
 		if (!($1 in ordem)) ordem[$1]=++n
-		if (!($1 in dbm) || $2 != "") dbm[$1]=$2
+		# O PRIMEIRO não-vazio ganha, e o recém-lido vem primeiro. A versão
+		# anterior testava só se o valor lido era não-vazio, e com isso o
+		# dBm ANTIGO sobrescrevia o recém-medido: a lista mostrava a
+		# potência da varredura passada — o pior número possível para quem
+		# está decidindo em qual rádio entrar.
+		if (dbm[$1]  == "") dbm[$1]=$2
 		if ($3+0 > g[$1]+0) g[$1]=$3
-		if (freq[$1]=="") freq[$1]=$4
-		if (ssid[$1]=="") ssid[$1]=$5
+		if (freq[$1] == "") freq[$1]=$4
+		if (sec[$1]  == "") sec[$1]=$5
+		if (ep[$1]   == "") ep[$1]=$6
+		if (ssid[$1] == "") ssid[$1]=$7
 	} END {
-		for (b in ordem) printf "%s\t%s\t%s\t%s\t%s\n", b, dbm[b], g[b], freq[b], ssid[b]
+		for (b in ordem)
+			printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				b, dbm[b], g[b], freq[b], sec[b], ep[b], ssid[b]
 	}')
 	printf '%s\n' "$fundido" > "$cache" 2>/dev/null
 	printf '%s\n' "$fundido"
 }
 
+# Segurança de UM rádio, do cache de pontos: "open", "owe", "wep", "psk",
+# "sae", "psk-sae", "eap". Vazio quando o rádio não é conhecido.
+_sec_de() {
+	_pontos | awk -F'\t' -v b="$1" 'tolower($1)==tolower(b) {print $5; exit}'
+}
 
-
-# A interface precisa ser conhecida ANTES da varredura: a geração de cada
-# rede sai de `iw dev <if> scan dump`, e com IF vazio o campo saía em branco.
-IF=$(iw dev 2>/dev/null | awk '/[[:space:]]Interface /{print $2; exit}')
-# --networks [--scan] [--todos]: uma linha por rede, ou por PONTO DE ACESSO.
+# Candidatos a subir um SSID, do MAIS provável para o menos.
 #
-#   "emuso|pct|dbm|seguranca|salva|geracao|fixado|bssid|ssid"
+# A ordem é o coração do conserto: quando dois perfis disputam o mesmo nome,
+# quem decide é a criptografia do RÁDIO de destino, não o alfabeto. Um rádio
+# que anuncia SAE quer o perfil `sae`; um que anuncia PSK quer o `wpa-psk`.
+# Empate desce para o mais recentemente usado — o que a pessoa acabou de
+# conseguir conectar tem mais chance de conectar de novo.
 #
-# Sem --todos, sobra o ponto mais forte de cada nome — que é o que se quer
-# ver no dia a dia. Com --todos, todos aparecem: é assim que se enxerga o
-# repetidor ao lado do principal e se escolhe a qual entrar.
+# Emite "uuid<TAB>nome<TAB>keymgmt".
+_candidatos() {
+	alvo_ssid="$1"; alvo_sec="${2:-}"; alvo_bssid="${3:-}"
+	_perfis | awk -F'\t' -v s="$alvo_ssid" -v sec="$alvo_sec" -v b="$alvo_bssid" '
+		$1 != s { next }
+		{
+			p = 0
+			if (sec != "") {
+				sae = (sec ~ /sae/)
+				psk = (sec ~ /psk/)
+				if ($4 == "sae"     &&  sae) p += 100
+				if ($4 == "wpa-psk" &&  psk) p += 100
+				if ($4 == "-"       && (sec == "open" || sec == "owe")) p += 100
+				# Rádio em TRANSIÇÃO (anuncia PSK e SAE ao mesmo tempo):
+				# os dois perfis servem nele, e o desempate vai para o
+				# WPA2. Não é preferência por criptografia velha — é que,
+				# numa casa com repetidor, o repetidor costuma falar só
+				# PSK, e o perfil WPA2 é o ÚNICO que entra nos dois
+				# rádios. Escolher o SAE aqui prende a máquina a um
+				# aparelho só e devolve, na primeira caminhada pela casa,
+				# o problema que este widget existe para resolver.
+				if (sae && psk && $4 == "wpa-psk") p += 5
+				# Perfil da criptografia que o rádio NÃO fala: continua
+				# candidato, mas por último — o cache do `iw` pode estar
+				# velho, e um palpite ruim ainda é melhor que desistir.
+				if ($4 == "sae"     && !sae) p -= 50
+				if ($4 == "wpa-psk" && !psk) p -= 50
+			}
+			# Já amarrado a este rádio: foi escolha de alguém, vale ponto.
+			if (b != "" && $5 == b) p += 10
+			# Desempate por uso recente, comprimido para não passar por
+			# cima do critério da criptografia: o timestamp em segundos
+			# tem dez dígitos e sozinho dominaria qualquer soma.
+			printf "%06d\t%s\t%s\t%s\n", p + 1000, $2, $3, $4
+		}' \
+	| sort -t"$(printf '\t')" -k1,1r \
+	| cut -f2-
+}
+
+# BSSID em uso agora, em minúsculas. Do `iw`, não do `nmcli`: o `nmcli -t`
+# escapa os dois-pontos do MAC como "\:" e devolve em maiúsculas, e comparar
+# sem normalizar os dois nunca casava — nenhuma rede aparecia como conectada.
+_bssid_atual() {
+	[ -n "${IF:-}" ] || return 0
+	iw dev "$IF" link 2>/dev/null | awk '/^Connected to /{print tolower($3); exit}'
+}
+
+_ssid_atual() {
+	[ -n "${IF:-}" ] || return 0
+	iw dev "$IF" link 2>/dev/null | awk '/^\tSSID: /{ $1=""; sub(/^ /,""); print; exit}'
+}
+
+# UUID do perfil sem fio ativo.
+_ativo_uuid() {
+	[ -n "${IF:-}" ] || return 0
+	/usr/bin/nmcli -t -f UUID,DEVICE connection show --active 2>/dev/null \
+	| awk -F: -v d="$IF" '$2==d {print $1; exit}'
+}
+
+# ================================================== preferência de rádio
 #
-# O SSID continua por ÚLTIMO: é o único campo que pode conter "|" ou ":".
-if [ "${1:-}" = "--networks" ]; then
-	if [ "${2:-}" = "--scan" ] || [ "${3:-}" = "--scan" ]; then
-		/usr/bin/nmcli dev wifi rescan >/dev/null 2>&1
-		sleep 4   # rescan returns at once; the results arrive later
-	fi
-	todos=0
-	case "${2:-}${3:-}" in *--todos*) todos=1 ;; esac
-
-	# Uma leitura só, DEPOIS da varredura: calculada antes, uma rede que só
-	# aparecia no scan novo saía sem geração.
-	PONTOS=$(_pontos)
-	saved=$(_wifi_profiles | cut -f1)
-	# Segurança e "em uso" vêm do NetworkManager, por NOME de rede.
-	segs=$(/usr/bin/nmcli -t -f SSID,SECURITY,IN-USE dev wifi list --rescan no 2>/dev/null)
-	# BSSID em uso agora. O `nmcli -t` ESCAPA os dois-pontos do MAC como
-	# "\:", e o `iw` devolve em minúsculas — comparar sem normalizar os dois
-	# nunca casava, e nenhuma rede aparecia como conectada.
-	atual=$(/usr/bin/nmcli -t -f ACTIVE,BSSID dev wifi list --rescan no 2>/dev/null \
-	        | awk -F'^(sim|yes|não|no):' '/^(sim|yes):/ {print substr($0, index($0,":")+1); exit}' \
-	        | tr -d '\\' | tr 'A-Z' 'a-z')
-
-	# Perfis AMARRADOS a um rádio: "ssid<TAB>bssid". É o que a caixa "só
-	# neste ponto" reflete — sem ler isto, ela mostraria desmarcada mesmo com
-	# a amarra posta, e o dono desconfiaria da própria configuração.
-	fixados=$(_wifi_profiles | while IFS=$'\t' read -r s_ssid s_perf; do
-		b=$(/usr/bin/nmcli -g 802-11-wireless.bssid connection show "$s_perf" 2>/dev/null)
-		[ -n "$b" ] && printf '%s\t%s\n' "$s_ssid" "$(printf '%s' "$b" | tr 'A-Z' 'a-z')"
-	done)
-
-	printf '%s\n' "$PONTOS" | while IFS=$'\t' read -r bssid dbm ger freq ssid; do
-		[ -n "$ssid" ] || continue
-		# dBm para porcento, a mesma régua que o NetworkManager usa:
-		# −100 é 0%, −50 é 100%, linear no meio.
-		d=${dbm%%.*}
-		pct=$(( (d + 100) * 2 ))
-		[ "$pct" -gt 100 ] && pct=100
-		[ "$pct" -lt 0 ] && pct=0
-		# Segurança desconhecida NÃO é rede aberta. Nossa lista tem memória
-		# própria e o NetworkManager não: um ponto que ele já esqueceu vinha
-		# com o campo vazio, e chamar isso de "aberta" desenhava cadeado
-		# aberto numa rede protegida — mentira na tela, do lado errado.
-		sec=$(printf '%s\n' "$segs" | awk -F: -v s="$ssid" '$1==s {print $2; exit}')
-		if [ -z "$sec" ]; then
-			printf '%s\n' "$segs" | awk -F: -v s="$ssid" '$1==s {found=1} END {exit !found}' \
-				&& sec="open" || sec="unknown"
-		fi
-		if printf '%s\n' "$saved" | grep -qxF "$ssid"; then sav=1; else sav=0; fi
-		uso=0
-		[ -n "$atual" ] && [ "$(printf '%s' "$bssid" | tr 'A-Z' 'a-z')" = "$atual" ] && uso=1
-		fix=0
-		alvo=$(printf '%s\n' "$fixados" | awk -F'\t' -v s="$ssid" '$1==s {print $2; exit}')
-		[ -n "$alvo" ] && [ "$(printf '%s' "$bssid" | tr 'A-Z' 'a-z')" = "$alvo" ] && fix=1
-		printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
-			"$uso" "$pct" "${d:-}" "$sec" "$sav" "${ger:-}" "$fix" "$bssid" "$ssid"
-	done \
-	| sort -t'|' -k2,2nr \
-	| if [ "$todos" = 1 ]; then
-		# Mostrando cada aparelho, a ordem é ALFABÉTICA — e, dentro do mesmo
-		# nome, do mais forte para o mais fraco. Por potência pura, o
-		# repetidor e o principal ficam separados por vizinhos no meio da
-		# lista, e a comparação que a pessoa foi fazer ali exige os dois
-		# lado a lado.
-		#
-		# A primeira chave vai do campo 9 ao FIM da linha: o SSID é o último
-		# campo justamente porque pode conter "|", e recortá-lo em nove
-		# quebraria o nome de quem usa esse caractere.
-		sort -t'|' -k9f -k2,2nr
-	else
-		# Uma linha por nome: sobra a mais forte, que é a que se quer ver no
-		# dia a dia. A lista já vem ordenada por potência.
-		awk -F'|' '!visto[$9]++'
-	fi
-	exit 0
-fi
-
-[ -n "${IF:-}" ] || { echo "nowifi"; exit 0; }
-
-LINK=$(iw dev "$IF" link 2>/dev/null)
-
-# --radio [on|off]: liga, desliga ou informa o rádio. Emite "on" ou "off".
+# Qual rádio se QUER usar, por MAC, com histerese de sinal.
 #
-# Fica ANTES de qualquer coisa que dependa da interface: com o rádio
-# desligado não há `iw dev` nenhum, e o botão precisa continuar respondendo
-# justamente nesse estado — senão desliga e não liga mais.
-if [ "${1:-}" = "--radio" ]; then
-	case "${2:-}" in
-	on|off) /usr/bin/nmcli radio wifi "$2" >/dev/null 2>&1 ;;
-	esac
-	estado=$(/usr/bin/nmcli radio wifi 2>/dev/null)
-	[ "$estado" = "enabled" ] && echo "on" || echo "off"
-	exit 0
-fi
+# Diferente da amarra: a amarra é ordem, a preferência é intenção. Um
+# repetidor mal colocado chega mais forte que o roteador principal em quase
+# toda a casa — e o NetworkManager, que decide por potência, entra sempre
+# nele. Quando esse repetidor faz NAT sobre NAT, o computador deixa de
+# enxergar o telefone que está na mesma casa, e nada na tela explica por quê.
+# A preferência mantém o principal enquanto ele der sinal SUFICIENTE, e só
+# cede quando não houver mesmo jeito.
+_dir_conf() {
+	d="${XDG_CONFIG_HOME:-$HOME/.config}/wifi-generation"
+	[ -d "$d" ] || mkdir -p "$d" 2>/dev/null
+	printf '%s' "$d"
+}
 
-# --rede: uma linha por interface física COM endereço:
-#   "tipo|dev|ip/cidr|gateway|link_mbps"
-#
-# Duas linhas quando há cabo e wifi ao mesmo tempo, que é o caso de quem
-# pluga o cabo sem desligar o rádio. Cada interface tem o SEU endereço, o SEU
-# gateway e a SUA velocidade; mostrar só uma esconde metade da rede — e a
-# primeira versão mostrava só a sem fio, o que apareceu no dia em que um cabo
-# foi plugado na máquina.
-#
-# `link` é a velocidade negociada do meio em Mb/s (100, 1000, 2500…), lida do
-# kernel. Só faz sentido no cabo: no wifi ela já vai no cabeçalho, vinda do
-# `iw`, e muda a cada quadro.
+# corte  — abaixo disso o rádio preferido não serve mais e a amarra sai.
+# margem — quanto ACIMA do corte ele precisa estar para a amarra voltar.
+#          Sem essa banda morta, um sinal oscilando em torno do corte
+#          reconectaria a rede a cada leitura. Seis dB é a oscilação normal
+#          de um enlace parado.
+# auto   — quem manda: 0 é só mostrar, 1 é agir sozinho.
+_ler_roam() {
+	corte=-80; margem=6; auto=0
+	a="$(_dir_conf)/roaming.conf"
+	[ -f "$a" ] || return 0
+	v=$(awk -F= '$1=="corte"{print $2; exit}'  "$a" 2>/dev/null); case "$v" in -[0-9]*) corte=$v ;; esac
+	v=$(awk -F= '$1=="margem"{print $2; exit}' "$a" 2>/dev/null); case "$v" in [0-9]*)  margem=$v ;; esac
+	v=$(awk -F= '$1=="auto"{print $2; exit}'   "$a" 2>/dev/null); case "$v" in 0|1)     auto=$v ;; esac
+	return 0
+}
+
+_gravar_roam() {
+	printf 'corte=%s\nmargem=%s\nauto=%s\n' "$corte" "$margem" "$auto" \
+		> "$(_dir_conf)/roaming.conf" 2>/dev/null
+}
+
+_pref_de() {
+	awk -F'\t' -v s="$1" '$1==s {print $2; exit}' \
+		"$(_dir_conf)/preferidos.tsv" 2>/dev/null
+}
+
+# ====================================================== rede e interfaces
 _ip4() { /usr/sbin/ip -4 addr show "$1" 2>/dev/null | awk '/inet /{print $2; exit}'; }
 _gw4() { /usr/sbin/ip -4 route show default dev "$1" 2>/dev/null | awk '{print $3; exit}'; }
+
+# A interface da rota padrão VENCEDORA. `ip route show default` já sai
+# ordenado por métrica, então a primeira linha é por onde o pacote sai.
+_dev_padrao() {
+	/usr/sbin/ip -4 route show default 2>/dev/null \
+	| awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}'
+}
 
 # Só interface FÍSICA: sem o teste de `device` entram docker0, veth, br- e
 # afins, que têm endereço e não são "a rede" de ninguém.
@@ -295,20 +336,6 @@ _interfaces() {
 		fi
 	done
 }
-
-if [ "${1:-}" = "--rede" ]; then
-	_interfaces | while IFS= read -r dev; do
-		if [ -d "/sys/class/net/$dev/wireless" ]; then
-			printf 'wifi|%s|%s|%s|\n' "$dev" "$(_ip4 "$dev")" "$(_gw4 "$dev")"
-		else
-			vel=$(cat "/sys/class/net/$dev/speed" 2>/dev/null)
-			[ "${vel:-0}" -gt 0 ] 2>/dev/null || vel=""
-			printf 'cabo|%s|%s|%s|%s\n' \
-				"$dev" "$(_ip4 "$dev")" "$(_gw4 "$dev")" "$vel"
-		fi
-	done
-	exit 0
-fi
 
 # Perfil do NetworkManager que governa uma interface.
 #
@@ -330,6 +357,688 @@ _perfil_de() {
 	fi
 	printf '%s' "$p"
 }
+
+# ================================================== qualidade medida por rádio
+#
+# dBm mede a ANTENA, não a SAÍDA. É o furo do critério por sinal: um repetidor
+# a 700 Mb/s de taxa negociada que entrega 5 Mb/s de internet ganha, no dBm, de
+# um roteador a 300 Mb/s que entrega 200. O número forte é o do enlace até o
+# aparelho ao lado; o número que interessa é o do outro lado dele.
+#
+# O que se mede, por BSSID:
+#   nat    — saltos PRIVADOS (RFC1918) antes do primeiro endereço público.
+#            Dois é NAT sobre NAT: o computador fica numa sub-rede própria e
+#            deixa de enxergar o telefone da casa. É o dado que denuncia o
+#            repetidor mesmo quando a latência está ótima — e estava: 11 ms e
+#            1,9 ms de jitter no dia em que este código foi escrito, com dois
+#            NATs no caminho.
+#   rtt    — ida e volta até a internet, em ms.
+#   jitter — desvio dessas idas e voltas (o `mdev` do ping).
+#   perda  — porcentagem de pacotes perdidos.
+#   pico   — maior vazão REAL já observada neste rádio, em bytes/s. Vem de
+#            graça: o widget já lê os contadores da interface a cada 2 s.
+#
+# Ficheiro: "bssid\tnat\trtt\tjitter\tperda\tpico\tamostras\tepoca".
+_arq_qual() { printf '%s/qualidade.tsv' "$(_dir_conf)"; }
+
+# Regrava uma linha inteira, preservando o resto do ficheiro.
+_qual_grava() {
+	arq=$(_arq_qual)
+	linha="$1"; b=$(printf '%s' "$linha" | cut -f1)
+	resto=$(awk -F'\t' -v b="$b" '$1!=b' "$arq" 2>/dev/null)
+	{
+		[ -n "$resto" ] && printf '%s\n' "$resto"
+		printf '%s\n' "$linha"
+	} > "$arq.tmp" 2>/dev/null
+	mv -f "$arq.tmp" "$arq" 2>/dev/null
+}
+
+_qual_le() {
+	awk -F'\t' -v b="$1" '$1==b {print; exit}' "$(_arq_qual)" 2>/dev/null
+}
+
+# A NOTA, 0 a 100, como soma pesada de cinco parciais — cada uma também 0 a
+# 100. Os pesos são o julgamento, e ficam à vista de propósito: quem discorda
+# muda um número, não desmonta uma fórmula.
+#
+#   NAT 35% — é o que quebra a rede local, e nenhum outro número o revela.
+#   vazão 30% — é a pergunta que a pessoa realmente faz.
+#   latência 20%, jitter 10%, perda 5% — mandam na chamada de vídeo.
+#
+# O SINAL NÃO ENTRA. Ele já falhou como critério; entra só como desempate
+# entre rádios que ninguém mediu ainda.
+_qual_nota() {
+	awk -F'\t' -v nat="$1" -v rtt="$2" -v jit="$3" -v perda="$4" -v pico="$5" '
+	BEGIN {
+		n = (nat <= 1) ? 100 : (nat == 2) ? 40 : 10
+		l = 100 - (rtt * 2   > 100 ? 100 : rtt * 2)
+		j = 100 - (jit * 10  > 100 ? 100 : jit * 10)
+		p = 100 - (perda * 10 > 100 ? 100 : perda * 10)
+		# Vazão em escala logarítmica: a diferença entre 1 e 5 MB/s pesa
+		# muito mais do que entre 20 e 25. 25 MB/s (200 Mb/s) é o teto.
+		mb = pico / 1048576
+		v = (mb <= 0) ? 0 : 100 * log(1 + mb) / log(1 + 25)
+		if (v > 100) v = 100
+		printf "%d", 0.35*n + 0.30*v + 0.20*l + 0.10*j + 0.05*p
+	}'
+}
+
+# --medir: mede o rádio em que a máquina ESTÁ, e guarda.
+#
+# Roda depois de a conexão já ter subido, que é quando não custa interrupção
+# nenhuma — foi a condição posta pelo dono: "quando eu estiver numa rede nova,
+# ou tentar me conectar, essa função roda em segundo plano".
+#
+# Leva uns 6 s e gasta alguns kB. O teste de vazão, que gasta megabytes, é
+# outro comando e só roda a pedido.
+if [ "${1:-}" = "--medir" ]; then
+	b=$(_bssid_atual)
+	[ -n "$b" ] || { echo "FAIL|nolink"; exit 1; }
+	gw=$(_gw4 "$IF")
+	[ -n "$gw" ] || { echo "FAIL|nogw"; exit 1; }
+	# Medida fresca não se refaz. Sem esta trava, uma reconexão por queda de
+	# sinal — que vem em rajada — dispararia uma medição atrás da outra, e o
+	# widget viraria a causa do tráfego que diz medir. `--forcar` é do botão.
+	if [ "${2:-}" != "--forcar" ]; then
+		ant=$(_qual_le "$b")
+		if [ -n "$ant" ]; then
+			ep=$(printf '%s' "$ant" | cut -f8)
+			case "$ep" in ''|*[!0-9]*) ep=0 ;; esac
+			if [ $(( $(date +%s) - ep )) -lt 600 ]; then
+				echo "OK|$b|fresca"
+				exit 0
+			fi
+		fi
+	fi
+
+	# LC_ALL=C obrigatório: o resumo do `ping` é TRADUZIDO. Num sistema em
+	# português a linha vira "10 pacotes transmitidos, 10 recebidos, 0% packet
+	# loss", em alemão vira outra coisa, e um parser preso ao inglês devolve
+	# vazio — que aqui viraria "sem resposta" e nota zero num enlace perfeito.
+	#
+	# -W 1 para não pendurar o motor de execução do Plasma num destino mudo.
+	est=$(LC_ALL=C ping -c 8 -i 0.2 -W 1 -q -n 1.1.1.1 2>/dev/null)
+	perda=$(printf '%s\n' "$est" | awk -F, '/packet loss/{for(i=1;i<=NF;i++) if($i ~ /loss/){gsub(/[^0-9.]/,"",$i); print $i+0; exit}}')
+	# "rtt min/avg/max/mdev = 7.217/11.081/13.768/1.880 ms", separando por
+	# "/" E por espaço: 8 é a MÉDIA e 10 é o mdev. A primeira versão pegava
+	# 11, que é o "ms" — e o jitter saía zero em toda medição, dando nota
+	# cheia de estabilidade a qualquer enlace.
+	rtt=$(printf '%s\n' "$est"  | awk -F'[/ ]' '/^rtt/{print $8+0;  exit}')
+	jit=$(printf '%s\n' "$est"  | awk -F'[/ ]' '/^rtt/{print $10+0; exit}')
+
+	# Sem resposta da internet: a medida não existe, e inventar zero seria
+	# dar nota máxima de latência a um enlace que não passa pacote.
+	if [ -z "${rtt:-}" ]; then
+		rtt=999; jit=999; perda=100
+	fi
+
+	# Profundidade de NAT. Conta saltos RFC1918 seguidos, do primeiro em
+	# diante — ou seja, só os roteadores DA CASA.
+	#
+	# O 100.64/10 não conta, e a razão não é a que eu escrevi na primeira
+	# versão. Chamei aquilo de "CGNAT"; é overclaim. A faixa é o Espaço de
+	# Endereçamento Compartilhado da RFC 6598, e provedores a usam tanto para
+	# CGNAT quanto, muito comumente, para numerar o transporte de acesso —
+	# concentradores, BNG — sem traduzir nada do assinante. Ver um salto
+	# dessa faixa não prova CGNAT nenhum: quem tem IPv4 público fixo não está
+	# atrás de CGNAT por definição, e continua vendo esse salto no caminho.
+	#
+	# De um jeito ou de outro ela fica de fora: ninguém em casa manda nela, e
+	# descontar nota do dono por um salto do provedor seria ruído.
+	nat=$(timeout 10 tracepath -4 -n -m 5 1.1.1.1 2>/dev/null | awk '
+		function privado(a) {
+			return a ~ /^10\./ || a ~ /^192\.168\./ ||
+			       a ~ /^172\.(1[6-9]|2[0-9]|3[01])\./
+		}
+		/^ *[0-9]+:/ {
+			for (i = 1; i <= NF; i++)
+				if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+					if ($i == ultimo) break
+					ultimo = $i
+					if (privado($i)) n++; else { pronto = 1 }
+					break
+				}
+		}
+		END { print (n ? n : 1) }')
+	[ -n "${nat:-}" ] || nat=1
+
+	antiga=$(_qual_le "$b")
+	pico=$(printf '%s' "$antiga" | cut -f6)
+	case "$pico" in ''|*[!0-9]*) pico=0 ;; esac
+	am=$(printf '%s' "$antiga" | cut -f7)
+	case "$am" in ''|*[!0-9]*) am=0 ;; esac
+
+	_qual_grava "$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+		"$b" "$nat" "$rtt" "$jit" "$perda" "$pico" "$((am + 1))" "$(date +%s)")"
+	printf 'OK|%s|%s|%s|%s|%s|%s\n' "$b" "$nat" "$rtt" "$jit" "$perda" \
+		"$(_qual_nota "$nat" "$rtt" "$jit" "$perda" "$pico")"
+	exit 0
+fi
+
+# --pico <bssid> <bytes_por_segundo>: registra vazão REAL observada.
+#
+# Chamado pelo widget, que já lê os contadores da interface a cada 2 s para
+# desenhar as setinhas. Custo zero e sem tráfego inventado: mede o que a
+# pessoa de fato conseguiu passar por aquele rádio. Só sobe, nunca desce —
+# é um piso do que o rádio consegue, não uma média do que ela pediu dele.
+if [ "${1:-}" = "--pico" ]; then
+	b=$(printf '%s' "${2:-}" | tr 'A-Z' 'a-z'); v="${3:-0}"
+	[ -n "$b" ] || { echo "FAIL|nobssid"; exit 1; }
+	case "$v" in ''|*[!0-9]*) echo "FAIL|badvalue"; exit 1 ;; esac
+	a=$(_qual_le "$b")
+	if [ -z "$a" ]; then
+		_qual_grava "$(printf '%s\t1\t999\t999\t100\t%s\t0\t%s' "$b" "$v" "$(date +%s)")"
+	else
+		velho=$(printf '%s' "$a" | cut -f6)
+		case "$velho" in ''|*[!0-9]*) velho=0 ;; esac
+		if [ "$v" -gt "$velho" ]; then
+			_qual_grava "$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+				"$b" "$(printf '%s' "$a" | cut -f2)" "$(printf '%s' "$a" | cut -f3)" \
+				"$(printf '%s' "$a" | cut -f4)" "$(printf '%s' "$a" | cut -f5)" \
+				"$v" "$(printf '%s' "$a" | cut -f7)" "$(date +%s)")"
+		fi
+	fi
+	echo "OK|$b"
+	exit 0
+fi
+
+# --teste: vazão ATIVA, a pedido. Baixa alguns megabytes e mede.
+#
+# Separado do --medir porque GASTA DADO. Numa conexão limitada, um widget que
+# baixa dez megabytes sozinho a cada troca de rádio é um defeito, não um
+# recurso — por isso vive atrás de um botão.
+if [ "${1:-}" = "--teste" ]; then
+	b=$(_bssid_atual)
+	[ -n "$b" ] || { echo "FAIL|nolink"; exit 1; }
+	# Alvo do próprio Cloudflare, que serve bytes de teste e não é conteúdo
+	# de ninguém. 10 MB é o bastante para sair do arranque lento do TCP.
+	bytes=$(curl -s --max-time 25 --interface "$IF" -o /dev/null \
+		-w '%{speed_download}' https://speed.cloudflare.com/__down?bytes=10000000 2>/dev/null)
+	v=${bytes%%.*}
+	case "$v" in ''|*[!0-9]*) echo "FAIL|nonet"; exit 1 ;; esac
+	[ "$v" -gt 0 ] || { echo "FAIL|nonet"; exit 1; }
+	"$0" --pico "$b" "$v" >/dev/null 2>&1
+	printf 'OK|%s|%s\n' "$b" "$v"
+	exit 0
+fi
+
+# --qualidade: o que se sabe de cada rádio, com a nota.
+#   "bssid|nat|rtt|jitter|perda|pico|amostras|nota"
+if [ "${1:-}" = "--qualidade" ]; then
+	while IFS=$'\t' read -r b nat rtt jit perda pico am ep; do
+		[ -n "$b" ] || continue
+		printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$b" "$nat" "$rtt" "$jit" \
+			"$perda" "$pico" "$am" "$(_qual_nota "$nat" "$rtt" "$jit" "$perda" "$pico")"
+	done < "$(_arq_qual)" 2>/dev/null
+	exit 0
+fi
+
+# ############################################################################
+# A partir daqui, só os modos de operação. Tudo o que eles chamam já existe.
+# ############################################################################
+
+# --connect <ssid> [bssid]
+#
+# Sobe um perfil JÁ SALVO e diz o que aconteceu.
+#
+# Com BSSID, o perfil é AMARRADO àquele rádio antes de subir. É o que resolve
+# o caso do repetidor: numa casa com dois rádios anunciando o mesmo nome, o
+# NetworkManager escolhe pelo sinal, e nem sempre é onde você quer entrar —
+# para configurar o principal, por exemplo. Sem BSSID, a amarra é DESFEITA,
+# senão o perfil ficaria preso a um rádio que pode nem existir amanhã.
+#
+# Tudo por UUID, nunca por nome, e a amarra sai dos OUTROS perfis do mesmo
+# SSID: com dois perfis homônimos, deixar um preso ao rádio velho fazia o
+# NetworkManager voltar sozinho para lá na reconexão seguinte.
+#
+# Falhou o primeiro candidato, tenta o próximo. O perfil homônimo com a
+# criptografia errada falha em segundos, e insistir nele é o que fazia o
+# sistema pedir senha numa rede salva.
+#
+# Emite "OK|<detalhe>" ou "FAIL|<detalhe>". O detalhe vem do nmcli, que o
+# sistema já traduz, então passa intacto.
+if [ "${1:-}" = "--connect" ]; then
+	target="${2:-}"
+	fixar=$(printf '%s' "${3:-}" | tr 'A-Z' 'a-z')
+	[ -n "$target" ] || { echo "FAIL|noname"; exit 1; }
+
+	sec=""
+	[ -n "$fixar" ] && sec=$(_sec_de "$fixar")
+
+	# Rastro em disco: sem ele, "cliquei e não aconteceu nada" não tem
+	# diagnóstico possível de fora — não dá para saber se o clique chegou,
+	# se o comando rodou, ou o que o nmcli respondeu.
+	log="${XDG_CACHE_HOME:-$HOME/.cache}/wifi-generation.log"
+	{
+		echo "--- $(date '+%F %T') ---"
+		echo "requested: $target"
+		echo "bssid    : ${fixar:-(roaming livre)}"
+		echo "ap sec   : ${sec:-(desconhecida)}"
+	} >> "$log" 2>/dev/null
+
+	lista=$(_candidatos "$target" "$sec" "$fixar")
+	if [ -z "$lista" ]; then
+		echo "noprofile: $target" >> "$log" 2>/dev/null
+		echo "FAIL|noprofile"
+		exit 1
+	fi
+
+	# A amarra sai de TODOS os perfis do SSID antes de entrar em um só.
+	_perfis | awk -F'\t' -v s="$target" '$1==s {print $2}' | while IFS= read -r outro; do
+		[ -n "$outro" ] || continue
+		/usr/bin/nmcli connection modify uuid "$outro" 802-11-wireless.bssid "" >/dev/null 2>&1
+	done
+
+	rc=1; out=""
+	while IFS=$'\t' read -r uuid nome km; do
+		[ -n "$uuid" ] || continue
+		if [ -n "$fixar" ]; then
+			/usr/bin/nmcli connection modify uuid "$uuid" \
+				802-11-wireless.bssid "$fixar" >/dev/null 2>&1
+		fi
+		out=$(/usr/bin/nmcli con up uuid "$uuid" 2>&1); rc=$?
+		{
+			echo "try      : $nome ($uuid, ${km:-aberta})"
+			echo "rc       : $rc"
+			echo "nmcli    : $out"
+		} >> "$log" 2>/dev/null
+		[ $rc -eq 0 ] && break
+		# Candidato queimado: tira a amarra que acabou de pôr, senão fica um
+		# perfil morto preso a um rádio vivo.
+		if [ -n "$fixar" ]; then
+			/usr/bin/nmcli connection modify uuid "$uuid" \
+				802-11-wireless.bssid "" >/dev/null 2>&1
+		fi
+	done <<-FIM
+	$lista
+	FIM
+
+	# ÚLTIMO RECURSO: nenhum perfil serviu, e o rádio pede uma criptografia
+	# que nenhum deles tem. A SENHA É A MESMA — WPA2-PSK e WPA3-SAE usam a
+	# mesma frase secreta —, então não há nada a perguntar a ninguém: clona-se
+	# o perfil que já existe e troca-se só o key-mgmt.
+	#
+	# Quem copia a senha é o NetworkManager, dentro dele, com `connection
+	# clone`. Este script NUNCA lê a senha: para lê-la seria preciso
+	# `--show-secrets`, que levanta uma janela de autorização e põe a frase no
+	# terminal, em `ps` e no log. Copiar sem ver é a única forma aceitável.
+	#
+	# Só aqui, e não por antecipação: um rádio em modo de transição (anuncia
+	# PSK e SAE) funciona com o perfil WPA2 e não precisa de nada disso.
+	# Criar o perfil WPA3 antes da hora seria fabricar a duplicata que este
+	# widget acabou de aprender a denunciar.
+	if [ $rc -ne 0 ] && [ -n "$sec" ]; then
+		falta=""; rotulo=""
+		case "$sec" in
+		sae)          falta="sae";     rotulo="WPA3" ;;
+		psk|psk-wpa1) falta="wpa-psk"; rotulo="WPA2" ;;
+		esac
+		ja=1
+		[ -n "$falta" ] && _perfis \
+			| awk -F'\t' -v s="$target" -v k="$falta" '$1==s && $4==k {f=1} END {exit !f}' \
+			&& ja=0 || ja=1
+		base=$(_perfis | awk -F'\t' -v s="$target" '$1==s {print $2; exit}')
+		if [ -n "$falta" ] && [ "$ja" = 1 ] && [ -n "$base" ]; then
+			nome="$target ($rotulo)"
+			# Nome já tomado: some o "(WPA3)" e o clone falharia por nome
+			# repetido, deixando o erro real escondido atrás de outro.
+			if _perfis | awk -F'\t' -v n="$nome" '$3==n {f=1} END {exit !f}'; then
+				novo=$(_perfis | awk -F'\t' -v n="$nome" '$3==n {print $2; exit}')
+			else
+				cl=$(/usr/bin/nmcli connection clone "$base" "$nome" 2>&1)
+				novo=$(_perfis | awk -F'\t' -v n="$nome" '$3==n {print $2; exit}')
+				echo "clone    : $cl" >> "$log" 2>/dev/null
+			fi
+			if [ -n "${novo:-}" ]; then
+				# SAE exige quadros de gerência protegidos; PSK não os pede.
+				if [ "$falta" = "sae" ]; then
+					/usr/bin/nmcli connection modify uuid "$novo" \
+						802-11-wireless-security.key-mgmt sae \
+						802-11-wireless-security.pmf required >/dev/null 2>&1
+				else
+					/usr/bin/nmcli connection modify uuid "$novo" \
+						802-11-wireless-security.key-mgmt wpa-psk \
+						802-11-wireless-security.pmf default >/dev/null 2>&1
+				fi
+				[ -n "$fixar" ] && /usr/bin/nmcli connection modify uuid "$novo" \
+					802-11-wireless.bssid "$fixar" >/dev/null 2>&1
+				out=$(/usr/bin/nmcli con up uuid "$novo" 2>&1); rc=$?
+				{
+					echo "derivado : $nome ($novo, $falta) — mesma senha"
+					echo "rc       : $rc"
+					echo "nmcli    : $out"
+				} >> "$log" 2>/dev/null
+				# Não vingou: o perfil derivado sai de cena. Perfil que não
+				# conecta é só mais um nome no sorteio da próxima vez.
+				[ $rc -ne 0 ] && /usr/bin/nmcli connection delete uuid "$novo" >/dev/null 2>&1
+			fi
+		fi
+	fi
+
+	if [ $rc -eq 0 ]; then
+		echo "OK|$target"
+	else
+		reason=$(printf '%s' "$out" | tail -1 | sed 's/^Error: //')
+		echo "FAIL|${reason:-exit $rc}"
+	fi
+	exit 0
+fi
+
+# --desfixar <ssid>: solta o perfil do rádio a que ele estava amarrado.
+#
+# Separado do --connect de propósito: desfixar NÃO reconecta. Quem tira a
+# amarra costuma estar de saída do lugar — reconectar ali seria desfazer o
+# que a pessoa acabou de pedir.
+#
+# Solta TODOS os perfis do SSID: com homônimos, soltar um só deixava o outro
+# preso, e a reconexão seguinte voltava para o rádio de onde se acabara de sair.
+if [ "${1:-}" = "--desfixar" ]; then
+	alvo="${2:-}"
+	[ -n "$alvo" ] || { echo "FAIL|noname"; exit 1; }
+	achou=0
+	while IFS= read -r u; do
+		[ -n "$u" ] || continue
+		achou=1
+		/usr/bin/nmcli connection modify uuid "$u" 802-11-wireless.bssid "" >/dev/null 2>&1
+	done <<-FIM
+	$(_perfis | awk -F'\t' -v s="$alvo" '$1==s {print $2}')
+	FIM
+	[ "$achou" = 1 ] && echo "OK|$alvo" || echo "FAIL|noprofile"
+	exit 0
+fi
+
+# --perfis <ssid>: todos os perfis que reivindicam esse nome de rede.
+#   "uuid|nome|keymgmt|bssid_fixo|ts|ativo"
+#
+# Existe para a tela poder DENUNCIAR a duplicata. Dois perfis para a mesma
+# rede não é curiosidade de administrador: é a explicação de por que a senha
+# é pedida de novo, e ninguém adivinha isso olhando o balão.
+if [ "${1:-}" = "--perfis" ]; then
+	alvo="${2:-}"
+	[ -n "$alvo" ] || exit 0
+	ativos=$(/usr/bin/nmcli -t -f UUID connection show --active 2>/dev/null)
+	# Montado no awk, e não num laço de `read`: com o BSSID vazio a leitura
+	# em shell fundia as duas tabulações e o timestamp aparecia como MAC.
+	_perfis | awk -F'\t' -v s="$alvo" -v at="$ativos" '
+		BEGIN { n = split(at, v, "\n"); for (i = 1; i <= n; i++) ativo[v[i]] = 1 }
+		$1 == s {
+			printf "%s|%s|%s|%s|%s|%s\n", $2, $3,
+				($4 == "-" ? "open" : $4), ($5 == "-" ? "" : $5), $6,
+				($2 in ativo ? 1 : 0)
+		}'
+	exit 0
+fi
+
+# --apagar-perfil <uuid>: remove um perfil salvo.
+#
+# Só por UUID. Apagar por nome, com homônimos na mesa, apagaria o perfil
+# errado — e o errado é justamente o que a pessoa está tentando manter.
+if [ "${1:-}" = "--apagar-perfil" ]; then
+	u="${2:-}"
+	[ -n "$u" ] || { echo "FAIL|noprofile"; exit 1; }
+	out=$(/usr/bin/nmcli connection delete uuid "$u" 2>&1); rc=$?
+	[ $rc -eq 0 ] && echo "OK|$out" || echo "FAIL|$out"
+	exit 0
+fi
+
+# --preferir <ssid> <bssid> · --despreferir <ssid>
+if [ "${1:-}" = "--preferir" ] || [ "${1:-}" = "--despreferir" ]; then
+	s="${2:-}"; b=$(printf '%s' "${3:-}" | tr 'A-Z' 'a-z')
+	[ -n "$s" ] || { echo "FAIL|noname"; exit 1; }
+	arq="$(_dir_conf)/preferidos.tsv"
+	# Reescreve sem a linha antiga e, se for o caso, com a nova. Um SSID tem
+	# UM preferido: dois seriam duas intenções contraditórias no mesmo lugar.
+	novo=$(awk -F'\t' -v s="$s" '$1!=s' "$arq" 2>/dev/null)
+	{
+		[ -n "$novo" ] && printf '%s\n' "$novo"
+		[ "$1" = "--preferir" ] && [ -n "$b" ] && printf '%s\t%s\n' "$s" "$b"
+	} > "$arq.tmp" 2>/dev/null
+	mv -f "$arq.tmp" "$arq" 2>/dev/null
+	echo "OK|$s"
+	exit 0
+fi
+
+# --limiar [corte <dbm>] [margem <db>] [auto 0|1]
+# Emite sempre o estado FINAL: "corte|margem|auto".
+if [ "${1:-}" = "--limiar" ]; then
+	_ler_roam
+	shift
+	while [ $# -ge 2 ]; do
+		case "$1" in
+		corte)  case "$2" in -[0-9]*) corte=$2 ;; esac ;;
+		margem) case "$2" in [0-9]*)  margem=$2 ;; esac ;;
+		auto)   case "$2" in 0|1)     auto=$2 ;; esac ;;
+		esac
+		shift 2
+	done
+	_gravar_roam
+	printf '%s|%s|%s\n' "$corte" "$margem" "$auto"
+	exit 0
+fi
+
+# --roaming: o retrato da decisão de rádio, e o que fazer a respeito.
+#
+#   "auto|corte|margem|ssid|pref_bssid|pref_dbm|atual_bssid|atual_dbm|fixado|acao"
+#
+# `acao` é CONSELHO, não ordem: "nada", "fixar" (entrar no preferido) ou
+# "soltar" (largar a amarra, o preferido não dá mais conta). Quem executa é o
+# widget, e só com o automático ligado — reconectar a rede de alguém sem que
+# essa pessoa tenha pedido é o tipo de esperteza que se paga caro.
+if [ "${1:-}" = "--roaming" ]; then
+	_ler_roam
+	ssid=$(_ssid_atual)
+	atual=$(_bssid_atual)
+	pref=""; pdbm=""; adbm=""; fixado=""; acao="nada"
+
+	if [ -n "$ssid" ]; then
+		pref=$(_pref_de "$ssid")
+		u=$(_ativo_uuid)
+		if [ -n "$u" ]; then
+			fixado=$(/usr/bin/nmcli -g 802-11-wireless.bssid connection show "$u" 2>/dev/null \
+				| tr 'A-Z' 'a-z')
+		fi
+		P=$(_pontos)
+		[ -n "$pref" ] && pdbm=$(printf '%s\n' "$P" \
+			| awk -F'\t' -v b="$pref" 'tolower($1)==b {print $2; exit}')
+		[ -n "$atual" ] && adbm=$(printf '%s\n' "$P" \
+			| awk -F'\t' -v b="$atual" 'tolower($1)==b {print $2; exit}')
+	fi
+
+	# A NOTA de cada rádio deste SSID, quando houver medida. É o que
+	# substitui o dBm como critério: o sinal mede a antena, a nota mede a
+	# saída — e foi por confiar no sinal que a máquina passou meses entrando
+	# no repetidor que entrega cinco megas.
+	nota_atual=""; melhor=""; melhor_nota=""
+	if [ -n "$ssid" ]; then
+		Q=$(cat "$(_arq_qual)" 2>/dev/null)
+		[ -n "$atual" ] && nota_atual=$(printf '%s\n' "$Q" \
+			| awk -F'\t' -v b="$atual" '$1==b {print; exit}' \
+			| while IFS=$'\t' read -r x n r j pe pi am e; do
+				[ -n "$x" ] && _qual_nota "$n" "$r" "$j" "$pe" "$pi"; done)
+		# Só concorre rádio DESTE nome de rede que já tenha sido medido.
+		# Rádio sem medida não recebe nota zero — recebe nenhuma, e fica de
+		# fora da comparação. Zero seria afirmar o que não se sabe.
+		melhor_nota=-1
+		while IFS=$'\t' read -r rb rdbm rg rf rsec rep rssid; do
+			[ "$rssid" = "$ssid" ] || continue
+			lb=$(printf '%s' "$rb" | tr 'A-Z' 'a-z')
+			reg=$(printf '%s\n' "$Q" | awk -F'\t' -v b="$lb" '$1==b {print; exit}')
+			[ -n "$reg" ] || continue
+			[ "$(printf '%s' "$reg" | cut -f7)" -gt 0 ] 2>/dev/null || continue
+			nt=$(printf '%s' "$reg" | cut -f2,3,4,5,6 | tr '\t' ' ')
+			# shellcheck disable=SC2086
+			nn=$(_qual_nota $nt)
+			if [ "${nn:-0}" -gt "$melhor_nota" ] 2>/dev/null; then
+				melhor_nota=$nn; melhor=$lb
+			fi
+		done <<-PONTOS
+		$P
+		PONTOS
+		[ "$melhor_nota" = "-1" ] && { melhor=""; melhor_nota=""; }
+	fi
+
+	if [ -n "$pref" ]; then
+		p=${pdbm%%.*}
+		if [ "$fixado" = "$pref" ]; then
+			# Já amarrados ao preferido. Só se larga quando ele realmente não
+			# dá mais conta — é para isso que existe o corte. Preferido
+			# invisível conta como abaixo do corte: rádio que sumiu não é
+			# rádio fraco, é rádio ausente.
+			if [ -z "$p" ] || [ "$p" -lt "$corte" ] 2>/dev/null; then
+				acao="soltar"
+			fi
+		elif [ "$atual" != "$pref" ]; then
+			# Fora do preferido. Volta-se para ele só quando estiver
+			# CONFORTAVELMENTE acima do corte — a margem é a banda morta que
+			# impede o vaivém quando o sinal oscila em torno do limite.
+			volta=$(( corte + margem ))
+			if [ -n "$p" ] && [ "$p" -ge "$volta" ] 2>/dev/null; then
+				acao="fixar"
+			fi
+		fi
+	fi
+
+	# Sem preferido MANUAL, quem aconselha é a medida. A margem de 15 pontos
+	# é banda morta: duas notas encostadas descrevem dois rádios equivalentes,
+	# e trocar de rádio para ganhar três pontos é derrubar a conexão de alguém
+	# por ruído de medição.
+	if [ -z "$pref" ] && [ -n "$melhor" ] && [ "$melhor" != "$atual" ] \
+	&& [ -n "$nota_atual" ] && [ -n "$melhor_nota" ]; then
+		if [ $(( melhor_nota - nota_atual )) -ge 15 ] 2>/dev/null; then
+			acao="trocar"
+		fi
+	fi
+
+	printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+		"$auto" "$corte" "$margem" "${ssid:-}" "${pref:-}" "${pdbm:-}" \
+		"${atual:-}" "${adbm:-}" "${fixado:-}" "$acao" \
+		"${nota_atual:-}" "${melhor:-}" "${melhor_nota:-}"
+	exit 0
+fi
+
+# --networks [--scan] [--todos]: uma linha por rede, ou por PONTO DE ACESSO.
+#
+#   "emuso|pct|dbm|seguranca|salva|geracao|fixado|preferido|bssid|ssid"
+#
+# Sem --todos, sobra o ponto mais forte de cada nome — que é o que se quer
+# ver no dia a dia. Com --todos, todos aparecem: é assim que se enxerga o
+# repetidor ao lado do principal e se escolhe a qual entrar.
+#
+# O SSID continua por ÚLTIMO: é o único campo que pode conter "|" ou ":".
+if [ "${1:-}" = "--networks" ]; then
+	# Depois de uma varredura de verdade, a memória vale noventa segundos: é o
+	# que faz o botão de varrer LIMPAR a lista em vez de só engordá-la.
+	prazo=300
+	if [ "${2:-}" = "--scan" ] || [ "${3:-}" = "--scan" ]; then
+		/usr/bin/nmcli dev wifi rescan >/dev/null 2>&1
+		sleep 4   # rescan returns at once; the results arrive later
+		prazo=90
+	fi
+	todos=0
+	case "${2:-}${3:-}" in *--todos*) todos=1 ;; esac
+
+	# Uma leitura só, DEPOIS da varredura: calculada antes, uma rede que só
+	# aparecia no scan novo saía sem geração.
+	PONTOS=$(_pontos "$prazo")
+	PERFIS=$(_perfis)
+	saved=$(printf '%s\n' "$PERFIS" | cut -f1 | sort -u)
+	atual=$(_bssid_atual)
+	prefs=$(cat "$(_dir_conf)/preferidos.tsv" 2>/dev/null)
+
+	# Perfis AMARRADOS a um rádio: "ssid<TAB>bssid". É o que a caixa "só
+	# neste ponto" reflete — sem ler isto, ela mostraria desmarcada mesmo com
+	# a amarra posta, e o dono desconfiaria da própria configuração.
+	fixados=$(printf '%s\n' "$PERFIS" | awk -F'\t' '$5!="-" {print $1 "\t" $5}')
+
+	printf '%s\n' "$PONTOS" | while IFS=$'\t' read -r bssid dbm ger freq sec epoca ssid; do
+		[ -n "$ssid" ] || continue
+		# dBm para porcento, a mesma régua que o NetworkManager usa:
+		# −100 é 0%, −50 é 100%, linear no meio.
+		d=${dbm%%.*}
+		pct=$(( (d + 100) * 2 ))
+		[ "$pct" -gt 100 ] && pct=100
+		[ "$pct" -lt 0 ] && pct=0
+		if printf '%s\n' "$saved" | grep -qxF "$ssid"; then sav=1; else sav=0; fi
+		b=$(printf '%s' "$bssid" | tr 'A-Z' 'a-z')
+		uso=0
+		[ -n "$atual" ] && [ "$b" = "$atual" ] && uso=1
+		fix=0
+		printf '%s\n' "$fixados" | awk -F'\t' -v s="$ssid" -v m="$b" \
+			'$1==s && $2==m {f=1} END {exit !f}' && fix=1
+		pref=0
+		printf '%s\n' "$prefs" | awk -F'\t' -v s="$ssid" -v m="$b" \
+			'$1==s && $2==m {f=1} END {exit !f}' && pref=1
+		printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+			"$uso" "$pct" "${d:-}" "${sec:-unknown}" "$sav" "${ger:-}" \
+			"$fix" "$pref" "$bssid" "$ssid"
+	done \
+	| sort -t'|' -k2,2nr \
+	| if [ "$todos" = 1 ]; then
+		# Mostrando cada aparelho, a ordem é ALFABÉTICA — e, dentro do mesmo
+		# nome, do mais forte para o mais fraco. Por potência pura, o
+		# repetidor e o principal ficam separados por vizinhos no meio da
+		# lista, e a comparação que a pessoa foi fazer ali exige os dois
+		# lado a lado.
+		#
+		# A primeira chave vai do campo 10 ao FIM da linha: o SSID é o último
+		# campo justamente porque pode conter "|", e recortá-lo em dez
+		# quebraria o nome de quem usa esse caractere.
+		sort -t'|' -k10f -k2,2nr
+	else
+		# Uma linha por nome: sobra a mais forte, que é a que se quer ver no
+		# dia a dia. A lista já vem ordenada por potência.
+		awk -F'|' '!visto[$10]++'
+	fi
+	exit 0
+fi
+
+# --radio [on|off]: liga, desliga ou informa o rádio. Emite "on" ou "off".
+#
+# Não depende de `iw dev`: com o rádio desligado não há interface nenhuma, e
+# o botão precisa continuar respondendo justamente nesse estado — senão
+# desliga e não liga mais.
+if [ "${1:-}" = "--radio" ]; then
+	case "${2:-}" in
+	on|off) /usr/bin/nmcli radio wifi "$2" >/dev/null 2>&1 ;;
+	esac
+	estado=$(/usr/bin/nmcli radio wifi 2>/dev/null)
+	[ "$estado" = "enabled" ] && echo "on" || echo "off"
+	exit 0
+fi
+
+# --rede: uma linha por interface física COM endereço:
+#   "tipo|dev|ip/cidr|gateway|link_mbps|padrao"
+#
+# Duas linhas quando há cabo e wifi ao mesmo tempo, que é o caso de quem
+# pluga o cabo sem desligar o rádio. Cada interface tem o SEU endereço, o SEU
+# gateway e a SUA velocidade; mostrar só uma esconde metade da rede — e a
+# primeira versão mostrava só a sem fio, o que apareceu no dia em que um cabo
+# foi plugado na máquina.
+#
+# `padrao` marca a interface por onde a internet REALMENTE sai: a da rota
+# padrão de menor métrica. Ter gateway não é sair por ele — com cabo e wifi
+# ligados os dois têm gateway e só um leva o tráfego. É esse campo que decide
+# qual símbolo a bandeja mostra.
+#
+# `link` é a velocidade negociada do meio em Mb/s (100, 1000, 2500…), lida do
+# kernel. Só faz sentido no cabo: no wifi ela já vai no cabeçalho, vinda do
+# `iw`, e muda a cada quadro.
+if [ "${1:-}" = "--rede" ]; then
+	padrao=$(_dev_padrao)
+	_interfaces | while IFS= read -r dev; do
+		p=0
+		[ "$dev" = "$padrao" ] && p=1
+		if [ -d "/sys/class/net/$dev/wireless" ]; then
+			printf 'wifi|%s|%s|%s||%s\n' "$dev" "$(_ip4 "$dev")" "$(_gw4 "$dev")" "$p"
+		else
+			vel=$(cat "/sys/class/net/$dev/speed" 2>/dev/null)
+			[ "${vel:-0}" -gt 0 ] 2>/dev/null || vel=""
+			printf 'cabo|%s|%s|%s|%s|%s\n' \
+				"$dev" "$(_ip4 "$dev")" "$(_gw4 "$dev")" "$vel" "$p"
+		fi
+	done
+	exit 0
+fi
 
 # --perfil <dev>: "perfil|metodo|ip/cidr|gateway|dns|pppoe"
 #
@@ -504,6 +1213,16 @@ if [ "${1:-}" = "--taxa" ]; then
 	exit 0
 fi
 
+# ############################################################################
+# Daqui para baixo é o enlace sem fio EM USO. Tudo o que não depende dele já
+# respondeu acima — inclusive `--rede` e `--taxa`, que numa máquina só de cabo
+# são a única coisa que há para dizer. Enquanto este corte estava lá em cima,
+# uma máquina sem placa wifi recebia "nowifi" até para perguntas sobre o cabo.
+# ############################################################################
+[ -n "${IF:-}" ] || { echo "nowifi"; exit 0; }
+
+LINK=$(iw dev "$IF" link 2>/dev/null)
+
 case "$LINK" in
 	*"Not connected"*|"") echo "disconnected"; exit 0 ;;
 esac
@@ -546,7 +1265,18 @@ fi
 vrx=$(printf '%s\n' "$rx" | awk '{for(i=1;i<=NF;i++) if($i=="bitrate:"){printf "%d", $(i+1); exit}}')
 vtx=$(printf '%s\n' "$tx" | awk '{for(i=1;i<=NF;i++) if($i=="bitrate:"){printf "%d", $(i+1); exit}}')
 
-# --detail: "gen|ssid|rx|tx|signal|quality|channel|width|number|band"
+# --detail:
+#   "gen|ssid|rx|tx|signal|quality|channel|width|number|band
+#    |bssid|fixado|perfil|preferido|perfis"
+#
+# Os cinco últimos campos existem para a tela poder dizer, sem rodeio, EM QUE
+# RÁDIO a máquina está e se ela pode sair dele. "Conectado ao wifi_zone_5G"
+# não distingue o roteador da sala do repetidor da varanda, e é exatamente
+# essa distinção que decide se o computador enxerga o telefone da casa.
+#
+# `perfis` é a CONTAGEM de perfis salvos para este nome de rede. Mais de um é
+# defeito de configuração com sintoma conhecido — pedido de senha em rede
+# salva — e a tela precisa poder denunciá-lo.
 if [ "${1:-}" = "--detail" ]; then
 	ssid=$(printf '%s\n' "$LINK" | awk '/SSID:/{ $1=""; sub(/^ /,""); print; exit}')
 	info=$(iw dev "$IF" info 2>/dev/null)
@@ -566,9 +1296,23 @@ if [ "${1:-}" = "--detail" ]; then
 		else                                    q="veryweak"
 		fi
 	fi
-	printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+	bssid=$(_bssid_atual)
+	u=$(_ativo_uuid)
+	perfil=""; fixado=""
+	if [ -n "$u" ]; then
+		perfil=$(/usr/bin/nmcli -g connection.id connection show "$u" 2>/dev/null)
+		fixado=$(/usr/bin/nmcli -g 802-11-wireless.bssid connection show "$u" 2>/dev/null \
+			| tr 'A-Z' 'a-z')
+	fi
+	pref=""; quantos=0
+	if [ -n "${ssid:-}" ]; then
+		pref=$(_pref_de "$ssid")
+		quantos=$(_perfis | awk -F'\t' -v s="$ssid" '$1==s' | wc -l | tr -d ' ')
+	fi
+	printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
 		"$gen" "${ssid:-}" "${vrx:-}" "${vtx:-}" "${sig:-}" "$q" \
-		"${chan:-}" "${width:-}" "$num" "$band"
+		"${chan:-}" "${width:-}" "$num" "$band" \
+		"${bssid:-}" "${fixado:-}" "${perfil:-}" "${pref:-}" "$quantos"
 	exit 0
 fi
 

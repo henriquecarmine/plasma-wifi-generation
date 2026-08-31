@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Wi-Fi Generation 1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-16 20:05-0300\n"
+"POT-Creation-Date: 2026-08-31 20:41-0300\n"
 "PO-Revision-Date: 2026-08-16 02:00-0300\n"
 "Last-Translator: Henrique Carmine <henriquecarmine@gmail.com>\n"
 "Language-Team: French\n"
@@ -12,273 +12,475 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
-#: package/contents/ui/main.qml:75
+#: package/contents/ui/main.qml:119
+msgid "not measured yet"
+msgstr "pas encore mesuré"
+
+#: package/contents/ui/main.qml:120
+msgid "score %1"
+msgstr "note %1"
+
+#: package/contents/ui/main.qml:121
+msgid "%1 NATs"
+msgstr "%1 NAT"
+
+#: package/contents/ui/main.qml:122
+msgid "1 NAT"
+msgstr "1 NAT"
+
+#: package/contents/ui/main.qml:136
 msgid "excellent"
 msgstr "excellent"
 
-#: package/contents/ui/main.qml:76
+#: package/contents/ui/main.qml:137
 msgid "good"
 msgstr "bon"
 
-#: package/contents/ui/main.qml:77
+#: package/contents/ui/main.qml:138
 msgid "fair"
 msgstr "correct"
 
-#: package/contents/ui/main.qml:78
+#: package/contents/ui/main.qml:139
 msgid "weak"
 msgstr "faible"
 
-#: package/contents/ui/main.qml:79
+#: package/contents/ui/main.qml:140
 msgid "very weak"
 msgstr "très faible"
 
-#: package/contents/ui/main.qml:80
+#: package/contents/ui/main.qml:141 package/contents/ui/main.qml:178
 msgid "unknown"
 msgstr "inconnue"
 
-#: package/contents/ui/main.qml:88
+#: package/contents/ui/main.qml:149
 msgid "2.4 GHz"
 msgstr "2,4 GHz"
 
-#: package/contents/ui/main.qml:89
+#: package/contents/ui/main.qml:150
 msgid "5 GHz"
 msgstr "5 GHz"
 
-#: package/contents/ui/main.qml:90
+#: package/contents/ui/main.qml:151
 msgid "6 GHz"
 msgstr "6 GHz"
 
-#: package/contents/ui/main.qml:98 package/contents/ui/main.qml:529
+#: package/contents/ui/main.qml:159 package/contents/ui/main.qml:815
 msgid "Unknown"
 msgstr "Inconnue"
 
-#: package/contents/ui/main.qml:102
+#: package/contents/ui/main.qml:168
 msgid "open"
 msgstr "ouvert"
 
-#: package/contents/ui/main.qml:191
+#: package/contents/ui/main.qml:169
+msgid "open (encrypted)"
+msgstr "ouvert (chiffré)"
+
+#: package/contents/ui/main.qml:177
+msgid "enterprise"
+msgstr "entreprise"
+
+#: package/contents/ui/main.qml:280
 msgid "gateway %1"
 msgstr "passerelle %1"
 
-#: package/contents/ui/main.qml:192
+#: package/contents/ui/main.qml:281
 msgid "out %1"
 msgstr "sortie %1"
 
-#: package/contents/ui/main.qml:193
+#: package/contents/ui/main.qml:282
 msgid "Copied"
 msgstr "Copié"
 
-#: package/contents/ui/main.qml:194
+#: package/contents/ui/main.qml:283
 msgid "Click to copy"
 msgstr "Cliquez pour copier"
 
-#: package/contents/ui/main.qml:220
+#: package/contents/ui/main.qml:309
 msgid "IP %1 · gateway %2 · out %3"
 msgstr "IP %1 · passerelle %2 · sortie %3"
 
-#: package/contents/ui/main.qml:336
+#: package/contents/ui/main.qml:445
 msgid "Type the address as 192.168.1.50/24"
 msgstr "Saisissez l'adresse comme 192.168.1.50/24"
 
-#: package/contents/ui/main.qml:357
+#: package/contents/ui/main.qml:466
 msgid "Add at least one address first"
 msgstr "Ajoutez d'abord une adresse"
 
-#: package/contents/ui/main.qml:424
+#: package/contents/ui/main.qml:518
+msgid "cable also connected (%1)"
+msgstr "câble également connecté (%1)"
+
+#: package/contents/ui/main.qml:519
+msgid "Wi-Fi also connected (%1)"
+msgstr "Wi-Fi également connecté (%1)"
+
+#: package/contents/ui/main.qml:560
 msgid "No free address found in this range"
 msgstr "Aucune adresse libre dans cette plage"
 
-#: package/contents/ui/main.qml:454
+#: package/contents/ui/main.qml:595 package/contents/ui/main.qml:1712
+msgid "Measured: %1"
+msgstr "Mesuré : %1"
+
+#: package/contents/ui/main.qml:596
+msgid "Could not measure throughput."
+msgstr "Impossible de mesurer le débit."
+
+#: package/contents/ui/main.qml:616
+msgid "Extra profile removed."
+msgstr "Profil en trop supprimé."
+
+#: package/contents/ui/main.qml:617
+msgid "Could not remove that profile."
+msgstr "Impossible de supprimer ce profil."
+
+#: package/contents/ui/main.qml:625
 msgid "%1 is free to use any access point again."
 msgstr "%1 peut de nouveau utiliser n'importe quel point d'accès."
 
-#: package/contents/ui/main.qml:456
+#: package/contents/ui/main.qml:627
 msgid "Could not release this network."
 msgstr "Impossible de libérer ce réseau."
 
-#: package/contents/ui/main.qml:496
+#: package/contents/ui/main.qml:699
+msgid "Going back to the preferred router…"
+msgstr "Retour au routeur préféré…"
+
+#: package/contents/ui/main.qml:702
+msgid "Preferred below %1 dBm — roaming."
+msgstr "Préféré sous %1 dBm — itinérance."
+
+#: package/contents/ui/main.qml:706
+msgid "Better router measured — switching."
+msgstr "Routeur meilleur, mesuré — changement."
+
+#: package/contents/ui/main.qml:749
+msgid "Measuring throughput…"
+msgstr "Mesure du débit…"
+
+#: package/contents/ui/main.qml:782
 msgid "No response from the system"
 msgstr "Aucune réponse du système"
 
-#: package/contents/ui/main.qml:503
+#: package/contents/ui/main.qml:789
 msgid "Connected to %1"
 msgstr "Connecté à %1"
 
-#: package/contents/ui/main.qml:505
+#: package/contents/ui/main.qml:791
 msgid "No network given"
 msgstr "Aucun réseau indiqué"
 
-#: package/contents/ui/main.qml:509
+#: package/contents/ui/main.qml:795
 msgid "Failed: %1"
 msgstr "Échec : %1"
 
-#: package/contents/ui/main.qml:515
+#: package/contents/ui/main.qml:801
 msgid "No Wi-Fi adapter"
 msgstr "Aucun adaptateur Wi-Fi"
 
-#: package/contents/ui/main.qml:521
+#: package/contents/ui/main.qml:807
 msgid "Disconnected"
 msgstr "Déconnecté"
 
-#: package/contents/ui/main.qml:592 package/contents/ui/main.qml:603
+#: package/contents/ui/main.qml:855
+msgid "Locked to this router"
+msgstr "Fixé à ce routeur"
+
+#: package/contents/ui/main.qml:861
+msgid "on the preferred router"
+msgstr "sur le routeur préféré"
+
+#: package/contents/ui/main.qml:862
+msgid "roaming — preferred out of reach"
+msgstr "itinérance — préféré hors de portée"
+
+#: package/contents/ui/main.qml:864
+msgid "roaming freely"
+msgstr "itinérance libre"
+
+#: package/contents/ui/main.qml:945 package/contents/ui/main.qml:956
 msgid "Connecting to %1…"
 msgstr "Connexion à %1…"
 
-#: package/contents/ui/main.qml:609
+#: package/contents/ui/main.qml:962
 msgid "Opening network settings…"
 msgstr "Ouverture de la configuration réseau…"
 
-#: package/contents/ui/main.qml:668 package/contents/ui/main.qml:815
+#: package/contents/ui/main.qml:991
+msgid "Wi-Fi and network settings…"
+msgstr "Paramètres Wi-Fi et réseau…"
+
+#: package/contents/ui/main.qml:996 package/contents/ui/main.qml:2083
+#: package/contents/ui/main.qml:2086
+msgid "Scan again"
+msgstr "Rechercher à nouveau"
+
+#: package/contents/ui/main.qml:1068 package/contents/ui/main.qml:1218
 msgid "%1/%2 Mb/s  ·  %3 dBm (%4)"
 msgstr "%1/%2 Mb/s  ·  %3 dBm (%4)"
 
-#: package/contents/ui/main.qml:845
+#: package/contents/ui/main.qml:1283
 msgid "Wi-Fi"
 msgstr "Wi-Fi"
 
-#: package/contents/ui/main.qml:900
+#: package/contents/ui/main.qml:1338
 msgid "%1 Mb/s"
 msgstr "%1 Mb/s"
 
-#: package/contents/ui/main.qml:903
+#: package/contents/ui/main.qml:1341
 msgid "Channel %1  ·  %2"
 msgstr "Canal %1  ·  %2"
 
-#: package/contents/ui/main.qml:937
+#: package/contents/ui/main.qml:1375
 msgid "no address"
 msgstr "sans adresse"
 
-#: package/contents/ui/main.qml:938
+#: package/contents/ui/main.qml:1376
 msgid "ip %1"
 msgstr "ip %1"
 
-#: package/contents/ui/main.qml:975
+#: package/contents/ui/main.qml:1413
 msgid "Address settings"
 msgstr "Réglages d'adresse"
 
-#: package/contents/ui/main.qml:989
+#: package/contents/ui/main.qml:1427
 msgid "Address of %1 (%2)"
 msgstr "Adresse de %1 (%2)"
 
-#: package/contents/ui/main.qml:999
+#: package/contents/ui/main.qml:1437
 msgid "DHCP"
 msgstr "DHCP"
 
-#: package/contents/ui/main.qml:1004
+#: package/contents/ui/main.qml:1442
 msgid "Manual"
 msgstr "Manuel"
 
-#: package/contents/ui/main.qml:1013
+#: package/contents/ui/main.qml:1451
 msgid "PPPoE"
 msgstr "PPPoE"
 
-#: package/contents/ui/main.qml:1037
+#: package/contents/ui/main.qml:1475
 msgid "Received automatically (DHCP)"
 msgstr "Reçu automatiquement (DHCP)"
 
-#: package/contents/ui/main.qml:1065
+#: package/contents/ui/main.qml:1503
 msgid "This machine"
 msgstr "Cet ordinateur"
 
-#: package/contents/ui/main.qml:1067
+#: package/contents/ui/main.qml:1505
 msgid "Gateway (router)"
 msgstr "Passerelle (routeur)"
 
-#: package/contents/ui/main.qml:1069
+#: package/contents/ui/main.qml:1507
 msgid "Out on the internet"
 msgstr "Sur internet"
 
-#: package/contents/ui/main.qml:1102
+#: package/contents/ui/main.qml:1540
 msgid "none"
 msgstr "aucune"
 
-#: package/contents/ui/main.qml:1123
+#: package/contents/ui/main.qml:1561
 msgid "Fixed addresses"
 msgstr "Adresses fixes"
 
-#: package/contents/ui/main.qml:1159
+#: package/contents/ui/main.qml:1597
 msgid "Remove this address"
 msgstr "Retirer cette adresse"
 
-#: package/contents/ui/main.qml:1175
+#: package/contents/ui/main.qml:1613
 msgid "another address, e.g. 192.168.1.240/24"
 msgstr "autre adresse, ex. 192.168.1.240/24"
 
-#: package/contents/ui/main.qml:1186
+#: package/contents/ui/main.qml:1624
 msgid "Suggest a free address"
 msgstr "Proposer une adresse libre"
 
-#: package/contents/ui/main.qml:1193
+#: package/contents/ui/main.qml:1631
 msgid "Add address"
 msgstr "Ajouter l'adresse"
 
-#: package/contents/ui/main.qml:1205
+#: package/contents/ui/main.qml:1643
 msgid "Gateway"
 msgstr "Passerelle"
 
-#: package/contents/ui/main.qml:1215
+#: package/contents/ui/main.qml:1653
 msgid "DNS"
 msgstr "DNS"
 
-#: package/contents/ui/main.qml:1230
+#: package/contents/ui/main.qml:1668
 msgid "Cancel"
 msgstr "Annuler"
 
-#: package/contents/ui/main.qml:1235
+#: package/contents/ui/main.qml:1673
 msgid "Apply"
 msgstr "Appliquer"
 
-#: package/contents/ui/main.qml:1270
+#: package/contents/ui/main.qml:1713
+msgid "Measuring…"
+msgstr "Mesure…"
+
+#: package/contents/ui/main.qml:1734
+msgid "Measure throughput (downloads ~10 MB)"
+msgstr "Mesurer le débit (télécharge ~10 Mo)"
+
+#: package/contents/ui/main.qml:1755
+msgid "%1 measured %2"
+msgstr "%1 a mesuré %2"
+
+#: package/contents/ui/main.qml:1764
+msgid "Switch"
+msgstr "Changer"
+
+#: package/contents/ui/main.qml:1802
+msgid "Preferred router"
+msgstr "Routeur préféré"
+
+#: package/contents/ui/main.qml:1823
+msgid "Stop preferring a router"
+msgstr "Ne plus préférer de routeur"
+
+#: package/contents/ui/main.qml:1839
+msgid "Give it up below"
+msgstr "L'abandonner sous"
+
+#: package/contents/ui/main.qml:1870
+msgid "Switch on its own"
+msgstr "Changer tout seul"
+
+#: package/contents/ui/main.qml:1875
+msgid "Switches by itself. Off, only warns."
+msgstr "Change tout seul. Désactivé, prévient seulement."
+
+#: package/contents/ui/main.qml:1883
+msgid "Go back to it now"
+msgstr "Y revenir maintenant"
+
+#: package/contents/ui/main.qml:1890
+msgid "too weak — release it"
+msgstr "trop faible — relâchez-le"
+
+#: package/contents/ui/main.qml:1935
+msgid "%1 saved profile for this network"
+msgid_plural "%1 saved profiles for this network"
+msgstr[0] "%1 profil enregistré pour ce réseau"
+msgstr[1] "%1 profils enregistrés pour ce réseau"
+
+#: package/contents/ui/main.qml:1943
+msgid "Hide"
+msgstr "Masquer"
+
+#: package/contents/ui/main.qml:1944
+msgid "Sort it out"
+msgstr "Régler ça"
+
+#: package/contents/ui/main.qml:1962
+msgid "Two profiles for one network: the system picks by chance. Keep one."
+msgstr ""
+"Deux profils pour un réseau : le système choisit au hasard. N'en gardez "
+"qu'un."
+
+#: package/contents/ui/main.qml:1992
+msgid "in use"
+msgstr "utilisé"
+
+#: package/contents/ui/main.qml:2008
+msgid "Remove this profile"
+msgstr "Supprimer ce profil"
+
+#: package/contents/ui/main.qml:2042
 msgid "%1 access point nearby"
 msgid_plural "%1 access points nearby"
 msgstr[0] "%1 point d'accès à proximité"
 msgstr[1] "%1 points d'accès à proximité"
 
-#: package/contents/ui/main.qml:1272
+#: package/contents/ui/main.qml:2044
 msgid "%1 network nearby"
 msgid_plural "%1 networks nearby"
 msgstr[0] "%1 réseau à proximité"
 msgstr[1] "%1 réseaux à proximité"
 
-#: package/contents/ui/main.qml:1285
+#: package/contents/ui/main.qml:2057
 msgid "scanning…"
 msgstr "recherche…"
 
-#: package/contents/ui/main.qml:1297 package/contents/ui/main.qml:1304
+#: package/contents/ui/main.qml:2069 package/contents/ui/main.qml:2076
 msgid "Show routers and repeaters"
 msgstr "Afficher routeurs et répéteurs"
 
-#: package/contents/ui/main.qml:1311 package/contents/ui/main.qml:1314
-msgid "Scan again"
-msgstr "Rechercher à nouveau"
-
-#: package/contents/ui/main.qml:1356
+#: package/contents/ui/main.qml:2128
 msgid "You are already on this network."
 msgstr "Vous êtes déjà sur ce réseau."
 
-#: package/contents/ui/main.qml:1415
+#: package/contents/ui/main.qml:2193
 msgid "Wi-Fi %1"
 msgstr "Wi-Fi %1"
 
-#: package/contents/ui/main.qml:1459
-msgid "Connect only to this router"
-msgstr "Se connecter uniquement à ce routeur"
+#: package/contents/ui/main.qml:2275
+msgid "Prefer this router while its signal holds"
+msgstr "Préférer ce routeur tant que son signal tient"
 
-#: package/contents/ui/main.qml:1460
+#: package/contents/ui/main.qml:2276 package/contents/ui/main.qml:2295
 msgid "Save the network first"
 msgstr "Enregistrez d'abord le réseau"
 
-#: package/contents/ui/main.qml:1491
-msgid "Number in the fan: Wi-Fi generation."
-msgstr "Le chiffre dans l'éventail : la génération Wi-Fi."
+#: package/contents/ui/main.qml:2294
+msgid "Stay on this router only"
+msgstr "Rester uniquement sur ce routeur"
 
-#: package/contents/ui/main.qml:1492
-msgid "Dimmed padlock: network not saved."
-msgstr "Cadenas éteint : réseau non enregistré."
+#: package/contents/ui/main.qml:2327
+msgid "not saved"
+msgstr "non enregistré"
 
-#: package/contents/ui/main.qml:1493
-msgid "Checkbox: stay on this router."
-msgstr "Case : fixe ce routeur."
+#: package/contents/ui/main.qml:2359
+msgid "Fan number: generation."
+msgstr "Chiffre dans l'éventail : génération."
+
+#: package/contents/ui/main.qml:2360
+msgid "Open padlock: no password."
+msgstr "Cadenas ouvert : réseau sans mot de passe."
+
+#: package/contents/ui/main.qml:2361
+msgid "Dimmed: not saved."
+msgstr "Estompé : réseau non enregistré."
+
+#: package/contents/ui/main.qml:2363
+msgid "Star: preferred router."
+msgstr "Étoile : routeur préféré."
+
+#: package/contents/ui/main.qml:2364
+msgid "Pin: locked to it."
+msgstr "Épingle : fixé à lui."
+
+#~ msgid ""
+#~ "Duplicates make the system ask the password again. Keep the one in use."
+#~ msgstr ""
+#~ "Le doublon fait redemander le mot de passe. Gardez celui qui est utilisé."
+
+#~ msgid ""
+#~ "Go back to the preferred router by itself, and give it up when it "
+#~ "weakens. Off, the widget only tells you."
+#~ msgstr ""
+#~ "Revient seul au routeur préféré et l'abandonne quand il faiblit. "
+#~ "Désactivé, le widget se contente de vous le dire."
+
+#~ msgid ""
+#~ "Duplicates are why the password is asked again when you move between "
+#~ "routers of the same network. Keep the one in use and remove the rest."
+#~ msgstr ""
+#~ "Les doublons expliquent pourquoi le mot de passe est redemandé lorsque "
+#~ "vous passez d'un routeur à l'autre du même réseau. Gardez celui qui est "
+#~ "utilisé et supprimez les autres."
+
+#~ msgid "Star: come back to this router when its signal allows."
+#~ msgstr "Étoile : revenir à ce routeur quand le signal le permet."
+
+#~ msgid "Pin: stay on it no matter what."
+#~ msgstr "Épingle : y rester quoi qu'il arrive."
+
+#~ msgid "Roaming — any router of this network"
+#~ msgstr "Itinérance — n'importe quel routeur de ce réseau"
 
 #~ msgid "Show every access point"
 #~ msgstr "Afficher chaque point d'accès"
