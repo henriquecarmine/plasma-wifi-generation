@@ -15,7 +15,7 @@
 %global clamp_mtime_to_source_date_epoch 0
 
 Name:           plasma-applet-wifi-generation
-Version:        1.8
+Version:        1.8.1
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -75,6 +75,20 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Tue Sep 01 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8.1-1
+- NOT MEASURED IS NOT BAD, and the difference decides which radio the machine
+  moves to. Observed throughput only counts as a sample above 128 kB/s: below
+  that what was watched is a clock widget and a browser tab — the background
+  traffic of an idle machine — and not the capacity of the radio. Counting it
+  as throughput gave zero on 30% of the score to a radio nobody had pushed
+  anything through, so it lost to one that had been used, and the widget
+  advised switching for lack of a sample rather than because of a measurement.
+  With no sample the term now leaves the sum and the remaining weights are
+  renormalised: the score says what is actually known — NAT depth, round trip,
+  jitter and loss. On the network this was written against, the repeater goes
+  from 43 to 62 and the router reads 93, and what separates them is the NAT
+  depth alone, which is the real difference.
+
 * Mon Aug 31 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8-1
 - ACCESS POINTS ARE NOW MEASURED, NOT GUESSED. Signal strength measures the
   antenna, not the way out: a repeater negotiating 700 Mb/s that delivers 5

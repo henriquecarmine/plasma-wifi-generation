@@ -414,12 +414,32 @@ _qual_nota() {
 		l = 100 - (rtt * 2   > 100 ? 100 : rtt * 2)
 		j = 100 - (jit * 10  > 100 ? 100 : jit * 10)
 		p = 100 - (perda * 10 > 100 ? 100 : perda * 10)
-		# Vazão em escala logarítmica: a diferença entre 1 e 5 MB/s pesa
-		# muito mais do que entre 20 e 25. 25 MB/s (200 Mb/s) é o teto.
-		mb = pico / 1048576
-		v = (mb <= 0) ? 0 : 100 * log(1 + mb) / log(1 + 25)
-		if (v > 100) v = 100
-		printf "%d", 0.35*n + 0.30*v + 0.20*l + 0.10*j + 0.05*p
+
+		# NÃO MEDIDO NÃO É RUIM, e esta distinção decide trocas de rádio.
+		#
+		# O pico só conta como medida acima de 128 kB/s: abaixo disso o que
+		# se observou foi um widget de tempo e uma aba de navegador — o
+		# tráfego de fundo de uma máquina parada —, e não a capacidade do
+		# rádio. Contando aquilo como vazão, um rádio em que ninguém puxou
+		# nada pesado leva zero nos 30% da vazão e perde para outro só
+		# porque alguém usou o outro. O widget mandaria trocar por falta de
+		# amostra, que é o oposto de decidir por medição.
+		#
+		# Sem amostra, o termo sai da conta e os pesos restantes são
+		# RENORMALIZADOS. A nota passa a dizer o que de fato se sabe: NAT,
+		# latência, jitter e perda.
+		piso = 131072
+		if (pico >= piso) {
+			# Escala logarítmica: a diferença entre 1 e 5 MB/s pesa muito
+			# mais que entre 20 e 25. 25 MB/s (200 Mb/s) é o teto.
+			mb = pico / 1048576
+			v = 100 * log(1 + mb) / log(1 + 25)
+			if (v > 100) v = 100
+			printf "%d", 0.35*n + 0.30*v + 0.20*l + 0.10*j + 0.05*p
+		} else {
+			soma = 0.35 + 0.20 + 0.10 + 0.05
+			printf "%d", (0.35*n + 0.20*l + 0.10*j + 0.05*p) / soma
+		}
 	}'
 }
 
