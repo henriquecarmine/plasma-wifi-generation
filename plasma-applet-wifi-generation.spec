@@ -15,7 +15,7 @@
 %global clamp_mtime_to_source_date_epoch 0
 
 Name:           plasma-applet-wifi-generation
-Version:        1.8.1
+Version:        1.8.2
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -75,6 +75,23 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Tue Sep 01 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8.2-1
+- The scroll bar now APPEARS when the list has more networks than fit. It was
+  there all along, but with no explicit policy it inherited the theme's, which
+  keeps it transparent until the pointer comes near — so a list that really
+  did scroll showed no bar at all, and nothing on screen said there were more
+  networks below. A bar that only shows itself to someone who already knows it
+  is there serves no purpose.
+- The row now opens TWO gaps on the right: one for the bar, one between the
+  bar and the padlock. The bar is drawn over the row rather than reserving
+  space, and with a single gap the icon touched it — not clipped, but it read
+  as clipped, and at 16 px nobody can tell the difference.
+- THE LEFTOVER HEIGHT GOES TO THE LIST, not to a spacer. The tray imposes a
+  minimum height of its own, almost always larger than the sections add up to,
+  and that difference used to become dead space at the bottom: eighteen
+  networks within reach, seven on screen, and an empty rectangle below the
+  size of four more. The list now shows as many as fit and scrolls the rest.
+
 * Tue Sep 01 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8.1-1
 - NOT MEASURED IS NOT BAD, and the difference decides which radio the machine
   moves to. Observed throughput only counts as a sample above 128 kB/s: below

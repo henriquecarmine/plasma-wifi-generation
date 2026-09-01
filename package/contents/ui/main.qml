@@ -2105,12 +2105,39 @@ PlasmoidItem {
                 // vão morto distribuído entre as seções.
                 implicitHeight: janela.alturaLista
                 Layout.preferredHeight: janela.alturaLista
+                // A SOBRA DA JANELA VAI PARA A LISTA, e não para um espaçador.
+                //
+                // A bandeja impõe uma altura mínima própria, quase sempre
+                // maior que a soma das seções. Essa diferença ia para um Item
+                // com `fillHeight` no fim da coluna e virava vão morto: dezoito
+                // redes ao alcance, sete na tela e um retângulo vazio embaixo
+                // do tamanho de mais quatro. Dando a sobra à lista, ela mostra
+                // quantas couberem e rola o resto — que é o que uma lista faz.
+                Layout.fillHeight: true
+                Layout.minimumHeight: janela.alturaLinha
                 model: redes
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 spacing: 0
 
-                QQC2.ScrollBar.vertical: PlasmaComponents.ScrollBar { id: barra }
+                // A lista transbordou? Um lugar só decide, porque DUAS coisas
+                // dependem da resposta e elas têm de concordar: a barra
+                // aparecer e a linha abrir caminho para ela. Calculadas em
+                // separado, elas divergiam por um quadro e o cadeado da
+                // direita piscava por baixo da barra.
+                readonly property bool rolando: contentHeight > height
+
+                // POLÍTICA EXPLÍCITA. Sem ela a barra nasce no modo do tema,
+                // que a deixa transparente até o ponteiro chegar perto —
+                // então numa lista que rola de verdade não havia barra
+                // nenhuma na tela, e nada dizia que existia mais rede
+                // embaixo. Barra que só aparece para quem já sabe que ela
+                // está lá não serve para nada.
+                QQC2.ScrollBar.vertical: PlasmaComponents.ScrollBar {
+                    id: barra
+                    policy: lista.rolando ? QQC2.ScrollBar.AlwaysOn
+                                          : QQC2.ScrollBar.AlwaysOff
+                }
 
                 delegate: Rectangle {
                     width: lista.width
@@ -2147,8 +2174,21 @@ PlasmoidItem {
                         // caminho para ela, o cadeado da direita ficava
                         // cortado ao meio em toda lista que rolasse — e é
                         // justamente a lista cheia que rola.
+                        //
+                        // A folga vai DUAS vezes: uma para a barra, outra
+                        // entre ela e o cadeado. Com uma só, o ícone
+                        // encostava na barra — não ficava cortado, mas lia
+                        // como se estivesse, e a diferença entre "encostado"
+                        // e "por baixo" ninguém enxerga num ícone de 16 px.
+                        //
+                        // `implicitWidth`, não `width`: a largura da barra é
+                        // zero enquanto ela está recolhida, e a linha se
+                        // ajustaria só depois de a barra aparecer — um
+                        // pulinho a cada vez que a lista cruza o limite.
                         anchors.rightMargin: Kirigami.Units.smallSpacing
-                            + (lista.contentHeight > lista.height ? barra.width : 0)
+                            + (lista.rolando
+                               ? barra.implicitWidth + Kirigami.Units.smallSpacing
+                               : 0)
                         spacing: Kirigami.Units.smallSpacing
 
                         PlasmaComponents.Label {
@@ -2337,18 +2377,6 @@ PlasmoidItem {
                         }
                     }
                 }
-            }
-
-            // Espaçador explícito: com fillHeight em NENHUM item, a folga da
-            // janela (a bandeja impõe uma altura mínima própria) acabava
-            // distribuída ENTRE as seções — vão acima da lista e abaixo dela.
-            // Dando um destino único à sobra, a lista encosta no cabeçalho e
-            // o que resta vira respiro antes do rodapé, que lê como
-            // intencional. Duas hipóteses minhas sobre a origem da folga
-            // falharam; isto não depende de descobrir a origem.
-            Item {
-                Layout.fillHeight: true
-                Layout.minimumHeight: 0
             }
 
             // A legenda ensina os três símbolos da lista, em três frases
