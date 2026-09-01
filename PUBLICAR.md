@@ -85,6 +85,33 @@ o **IP público da máquina** numa dica aberta — mostrá-lo na própria tela �
 coisa, publicá-lo numa loja indexada é outra, e não se desfaz. Antes de subir:
 dica aberta, endereço de saída, nome de rede vizinha.
 
+**E o BSSID conta como endereço.** A captura de roteadores e repetidores mostra
+uma coluna inteira de MAC de ponto de acesso, e MAC de ponto de acesso é
+GEOLOCALIZÁVEL: bases públicas como a do WiGLE mapeiam BSSID para coordenada,
+que é como um telefone se localiza sem GPS. Publicar a coluna crua entrega o
+endereço de casa — o da máquina e o dos vizinhos, que não foram consultados.
+A captura em `screenshots/03-repeaters.png` das versões até a 1.7 fazia isso.
+
+Anonimize NA ORIGEM, e não com tarja: tarja em imagem escura fica visível e
+feia, e recortar a coluna descaracteriza a tela. Um envoltório do script, só
+para a captura, troca os cinco primeiros octetos e PRESERVA o último, para as
+linhas continuarem distintas entre si:
+
+```bash
+D=~/.local/share/plasma/plasmoids/com.henrique.wifigeracao
+REAL=$PWD/package/contents/code/wifi-geracao
+cp -a package/. "$D/"
+cat > "$D/contents/code/wifi-geracao" <<'WRAP'
+#!/usr/bin/bash
+/bin/bash 'CAMINHO_REAL' "$@" | sed -E 's/([0-9a-fA-F]{2}:){5}([0-9a-fA-F]{2})/02:00:5e:00:00:\2/g'
+WRAP
+```
+
+`02:00:5e:00:00:xx` é endereço localmente administrado, não roteável e não
+atribuído a fabricante nenhum — não aponta para lugar nenhum do mundo.
+Terminadas as capturas, **apague a cópia**: ela sombreia a instalação de
+sistema, e um `dnf upgrade` depois parece não fazer efeito.
+
 ---
 
 ## Título
