@@ -15,7 +15,7 @@
 %global clamp_mtime_to_source_date_epoch 0
 
 Name:           plasma-applet-wifi-generation
-Version:        1.8.3
+Version:        1.8.4
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -75,6 +75,15 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Tue Sep 01 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8.4-1
+- The measurement renews itself every ten minutes. Until now it refreshed
+  only when the radio CHANGED, so a machine that spends the day on one access
+  point would decide forever with the number from the moment it arrived — and
+  the network in the afternoon is not the network at dawn. A promise to decide
+  by measurement needs a live measurement. Ten minutes is the same interval
+  the script uses to refuse repeating itself, so a call that arrives too early
+  costs one file read and nothing else.
+
 * Tue Sep 01 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8.3-1
 - The measurement WAITS for the link to settle. Measuring at the moment of
   association measures the worst moment of the link: DHCP, ARP, the first DNS

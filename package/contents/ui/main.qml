@@ -768,6 +768,24 @@ PlasmoidItem {
         onTriggered: root.medirRadio(false)
     }
 
+    // REMEDIR DE TEMPOS EM TEMPOS.
+    //
+    // Sem isto, a medida só se renovava ao TROCAR de rádio: uma máquina que
+    // passa o dia no mesmo ponto de acesso decidiria para sempre com o número
+    // de quando entrou nele — e a rede da tarde não é a da madrugada. Uma
+    // promessa de decidir por medição precisa de medição viva.
+    //
+    // Dez minutos, que é o mesmo prazo que o script usa para recusar refazer:
+    // a chamada que chega cedo demais custa a leitura de um arquivo e nada
+    // mais. Roda com o balão FECHADO também — quem decide o rádio não é quem
+    // está olhando.
+    Timer {
+        interval: 600000
+        running: root.conectado
+        repeat: true
+        onTriggered: root.medirRadio(false)
+    }
+
     onBssidAtualChanged: {
         if (root.bssidAtual.length === 0) return;
         // Rádio novo, medida nova, e o pico recomeça: o pico é DESTE rádio.

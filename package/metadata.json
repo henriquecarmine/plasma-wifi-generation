@@ -12,7 +12,7 @@
         "Id": "com.henrique.wifigeracao",
         "License": "MIT",
         "Name": "Wi-Fi Generation",
-        "Version": "1.8.3"
+        "Version": "1.8.4"
     },
     "X-Plasma-API-Minimum-Version": "6.0",
     "X-Plasma-NotificationArea": "true",
