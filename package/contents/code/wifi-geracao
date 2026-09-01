@@ -528,6 +528,37 @@ if [ "${1:-}" = "--medir" ]; then
 	am=$(printf '%s' "$antiga" | cut -f7)
 	case "$am" in ''|*[!0-9]*) am=0 ;; esac
 
+	# MÉDIA CORRENTE, não substituição.
+	#
+	# Uma amostra só é refém do instante em que foi tirada. Medindo logo após
+	# a associação — que é quando o widget mede — o enlace ainda está se
+	# ajeitando: aqui o roteador saiu com 68 ms e 48 ms de jitter, contra 12 ms
+	# do repetidor, e a nota disse que o pior dos dois era o melhor. Errado por
+	# um único mau momento.
+	#
+	# O peso é LIMITADO a sete: sem teto, as primeiras leituras congelariam o
+	# valor para sempre e mudar o aparelho de lugar não mudaria a nota.
+	#
+	# Só se promedia leitura BOA com leitura BOA. Uma medição que não obteve
+	# resposta é outro estado, não um número ruim: promediá-la puxaria a
+	# latência para o meio do caminho entre "9 ms" e "não responde", que não
+	# descreve nada. Sem resposta zera a contagem e recomeça.
+	if [ "$rtt" = "999" ]; then
+		am=0
+	elif [ "$am" -gt 0 ] && [ -n "$antiga" ]; then
+		o_rtt=$(printf '%s' "$antiga" | cut -f3)
+		o_jit=$(printf '%s' "$antiga" | cut -f4)
+		o_per=$(printf '%s' "$antiga" | cut -f5)
+		case "$o_rtt" in 999|'') am=0 ;; esac
+		if [ "$am" -gt 0 ]; then
+			set -- $(awk -v a="$o_rtt" -v b="$rtt" -v c="$o_jit" -v d="$jit" \
+			             -v e="$o_per" -v f="$perda" -v n="$am" \
+			  'BEGIN { w = (n > 7 ? 7 : n)
+			           printf "%.3f %.3f %.2f", (a*w+b)/(w+1), (c*w+d)/(w+1), (e*w+f)/(w+1) }')
+			rtt="$1"; jit="$2"; perda="$3"
+		fi
+	fi
+
 	_qual_grava "$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
 		"$b" "$nat" "$rtt" "$jit" "$perda" "$pico" "$((am + 1))" "$(date +%s)")"
 	printf 'OK|%s|%s|%s|%s|%s|%s\n' "$b" "$nat" "$rtt" "$jit" "$perda" \

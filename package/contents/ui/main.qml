@@ -753,12 +753,27 @@ PlasmoidItem {
         exec.connectSource(cmd("--teste"));
     }
 
+    // ESPERAR O ENLACE ASSENTAR antes de medir.
+    //
+    // Medir no instante da associação é medir o pior momento do enlace: há
+    // DHCP, ARP, o primeiro DNS e o rádio ainda se ajustando. Aqui o roteador
+    // saiu com 68 ms e 48 ms de jitter medido assim, contra 12 ms do
+    // repetidor — e a nota disse que o pior dos dois era o melhor.
+    //
+    // `restart()` a cada troca: numa reassociação em rajada, só a última
+    // conta, e nenhuma medição sai no meio do vaivém.
+    Timer {
+        id: assentar
+        interval: 12000
+        onTriggered: root.medirRadio(false)
+    }
+
     onBssidAtualChanged: {
         if (root.bssidAtual.length === 0) return;
         // Rádio novo, medida nova, e o pico recomeça: o pico é DESTE rádio.
         root.picoSessao = 0;
         root.picoGravado = 0;
-        root.medirRadio(false);
+        assentar.restart();
     }
     function alternarRadio(ligar) {
         root.avisoAcao = "";

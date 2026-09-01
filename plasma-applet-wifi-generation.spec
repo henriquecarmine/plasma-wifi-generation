@@ -15,7 +15,7 @@
 %global clamp_mtime_to_source_date_epoch 0
 
 Name:           plasma-applet-wifi-generation
-Version:        1.8.2
+Version:        1.8.3
 Release:        1%{?dist}
 Summary:        Plasma applet showing the Wi-Fi generation (4/5/6/6E/7) in the system tray
 
@@ -75,6 +75,23 @@ rm -f %{buildroot}%{_datadir}/plasma/plasmoids/%{plasmoid_id}/README.md
 %{_datadir}/plasma/plasmoids/%{plasmoid_id}/
 
 %changelog
+* Tue Sep 01 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8.3-1
+- The measurement WAITS for the link to settle. Measuring at the moment of
+  association measures the worst moment of the link: DHCP, ARP, the first DNS
+  and the radio still adjusting. Measured that way, the main router came out
+  at 68 ms with 48 ms of jitter against 12 ms for the repeater, and the score
+  said the worse of the two was the better one. Twelve seconds, restarted on
+  every change, so a burst of reassociations produces one measurement and not
+  a measurement in the middle of the coming and going.
+- Latency, jitter and loss are now a RUNNING AVERAGE instead of a
+  replacement. One sample is hostage to the instant it was taken. The weight
+  is capped at seven, otherwise the first readings would freeze the value for
+  good and moving the device would never change its score.
+- Only a good reading averages with a good reading. A measurement that got no
+  answer is a different state, not a bad number: averaging it would pull the
+  latency to the middle between "9 ms" and "no answer", which describes
+  nothing. No answer resets the count and starts over.
+
 * Tue Sep 01 2026 Henrique Carmine <henriquecarmine@gmail.com> - 1.8.2-1
 - The scroll bar now APPEARS when the list has more networks than fit. It was
   there all along, but with no explicit policy it inherited the theme's, which
